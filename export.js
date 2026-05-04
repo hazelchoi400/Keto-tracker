@@ -69,7 +69,7 @@ async function exportXLSX(fromMs, toMs) {
   const aboutSheet = buildAboutSheet(settings, fromMs, toMs, measurements.length, seizures.length);
   XLSX.utils.book_append_sheet(wb, aboutSheet, 'About');
 
-  const filename = `ketocare_${(settings.childName || 'export').replace(/\s+/g,'_').toLowerCase()}_${fmtDateISO(fromMs)}_to_${fmtDateISO(toMs)}.xlsx`;
+  const filename = `ketocare_${(settings.childName || 'export').replace(/\s+/g,'_').toLowerCase()}_${fmtDateISO(fromMs)}_to_${fmtDateISO(toMs)}_full.xlsx`;
   XLSX.writeFile(wb, filename);
 }
 
@@ -653,7 +653,7 @@ async function exportPDF(fromMs, toMs) {
     doc.text(`KetoCare · page ${i} of ${pageCount}`, PAGE_W - MARGIN, 290, { align: 'right' });
   }
 
-  const filename = `ketocare_summary_${(settings.childName || 'export').replace(/\s+/g,'_')}_${fmtDateISO(fromMs)}_to_${fmtDateISO(toMs)}.pdf`;
+  const filename = `ketocare_${(settings.childName || 'export').replace(/\s+/g,'_').toLowerCase()}_${fmtDateISO(fromMs)}_to_${fmtDateISO(toMs)}_summary.pdf`;
   doc.save(filename);
 }
 

@@ -3,7 +3,10 @@
    Caches app shell + CDN scripts so the app works offline
    ===================================================== */
 
-const CACHE_NAME = 'ketocare-v2';
+// Bump this version string whenever you ship an update. The browser uses
+// it to detect new versions. The convention is to keep this in sync with
+// the "Version" label shown on the About page in index.html.
+const CACHE_NAME = 'ketocare-v1.0';
 
 // Files to cache on install. Same-origin paths are relative; CDN URLs are absolute.
 const PRECACHE = [
@@ -29,8 +32,16 @@ self.addEventListener('install', (event) => {
           cache.add(url).catch((err) => console.warn('[sw] skip cache', url, err))
         )
       )
-    ).then(() => self.skipWaiting())
+    )
+    // NB: no skipWaiting() here — we wait for the page to send a SKIP_WAITING
+    // message via the "Refresh" button. This lets the user choose when to update.
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', (event) => {

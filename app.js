@@ -56,6 +56,12 @@ function navigateTo(screenName) {
   if (screenName === 'measurement')   resetMeasurementForm();
 }
 
+async function dismissWelcome(opts = {}) {
+  state.settings.welcomeDismissed = true;
+  await KCDB.saveSettings(state.settings);
+  if (!opts.skipNavigate) navigateTo('home');
+}
+
 /* =====================================================
    Chip group helpers
    ===================================================== */
@@ -683,6 +689,7 @@ function getReminderTimes() {
 async function handleSettingsSubmit(e) {
   e.preventDefault();
   const settings = {
+    ...(state.settings || {}),  // preserve fields not in the form (e.g. welcomeDismissed)
     childName: document.getElementById('settingChildName').value.trim(),
     dob: document.getElementById('settingDOB').value,
     variant: state.selectedSettingVariant,
@@ -775,8 +782,11 @@ async function handleImportFile(e) {
 document.addEventListener('DOMContentLoaded', async () => {
   state.settings = await KCDB.getSettings();
 
-  // First-time setup nudge
-  if (!state.settings.childName) {
+  // First-time launch: show Welcome screen (replaces the old toast nudge)
+  if (!state.settings.welcomeDismissed) {
+    navigateTo('welcome');
+  } else if (!state.settings.childName) {
+    // Returning user who never set a name (e.g. dismissed welcome without going further)
     setTimeout(() => {
       toast('Tap settings to add child profile');
     }, 600);
@@ -785,10 +795,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Navigation buttons (any element with data-go)
   document.body.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-go]');
-    if (btn && !e.target.closest('form')) {
-      e.preventDefault();
-      navigateTo(btn.dataset.go);
+    if (!btn) return;
+    // If the data-go is on/inside a form, only honour it if the trigger is an explicit button (not a submit)
+    const inForm = e.target.closest('form');
+    if (inForm) {
+      // Only allow data-go nav from explicit type="button" buttons (e.g. About link)
+      if (btn.tagName !== 'BUTTON' || btn.type === 'submit') return;
     }
+    e.preventDefault();
+    navigateTo(btn.dataset.go);
   });
 
   // Timer
@@ -864,13 +879,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('exportCSVBtn').addEventListener('click', async () => {
     const { fromMs, toMs } = getExportRange();
     await KCExport.exportXLSX(fromMs, toMs);
-    toast('Spreadsheet downloaded');
+    toast('Detailed records downloaded');
   });
   document.getElementById('exportPDFBtn').addEventListener('click', async () => {
     const { fromMs, toMs } = getExportRange();
-    toast('Generating PDF…');
+    toast('Generating report…');
     await KCExport.exportPDF(fromMs, toMs);
-    toast('PDF downloaded');
+    toast('Summary report downloaded');
   });
   document.getElementById('exportJSONBtn').addEventListener('click', async () => {
     await KCExport.exportJSON();
@@ -878,18 +893,71 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('importJSON').addEventListener('change', handleImportFile);
 
+  // Welcome screen buttons
+  document.getElementById('welcomeGotItBtn').addEventListener('click', dismissWelcome);
+  document.getElementById('welcomeLearnMoreBtn').addEventListener('click', async () => {
+    await dismissWelcome({ skipNavigate: true });
+    navigateTo('about');
+  });
+
+  // About screen — re-show welcome
+  document.getElementById('showWelcomeAgainBtn').addEventListener('click', async () => {
+    state.settings.welcomeDismissed = false;
+    await KCDB.saveSettings(state.settings);
+    navigateTo('welcome');
+  });
+
   // Schedule reminders if any
   scheduleReminders((state.settings.reminders) || []);
 
   // Initial render
   renderHome();
 
-  // Register service worker for offline support
+  // Register service worker for offline support + update detection
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch((err) => {
-        console.warn('SW registration failed', err);
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      // Check for updates each time the app starts
+      reg.update().catch(() => {});
+
+      // If a new SW is already waiting (installed but not yet active), show banner now
+      if (reg.waiting && navigator.serviceWorker.controller) {
+        showUpdateBanner(reg.waiting);
+      }
+
+      // Listen for new SWs starting to install
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          // 'installed' + an existing controller means an update has arrived
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            showUpdateBanner(newWorker);
+          }
+        });
       });
+    }).catch((err) => {
+      console.warn('SW registration failed', err);
+    });
+
+    // When the new SW takes over, reload so the page uses the new files
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      window.location.reload();
     });
   }
 });
+
+function showUpdateBanner(waitingWorker) {
+  const banner = document.getElementById('updateBanner');
+  const btn = document.getElementById('updateBannerBtn');
+  if (!banner || !btn) return;
+  banner.classList.add('show');
+  btn.onclick = () => {
+    btn.disabled = true;
+    btn.textContent = 'Refreshing…';
+    // Tell the waiting SW to take over; controllerchange handler will reload
+    waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+  };
+}

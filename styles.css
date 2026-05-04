@@ -948,6 +948,200 @@ body::before {
 }
 
 /* =====================================================
+   Update banner
+   ===================================================== */
+
+.update-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: var(--sage-deep);
+  color: var(--surface);
+  padding: calc(var(--safe-top) + 0.6rem) 1rem 0.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  font-size: 0.92rem;
+  font-weight: 500;
+  box-shadow: 0 2px 12px rgba(70, 55, 40, 0.15);
+  transform: translateY(-100%);
+  transition: transform 0.32s ease-out;
+  pointer-events: none;
+}
+
+.update-banner.show {
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.update-banner-text {
+  flex: 0 1 auto;
+}
+
+.update-banner-btn {
+  background: var(--surface);
+  color: var(--sage-deep);
+  border: none;
+  padding: 0.45rem 1.1rem;
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: transform 0.15s ease;
+}
+
+.update-banner-btn:active { transform: scale(0.96); }
+
+/* =====================================================
+   Welcome screen (first launch)
+   ===================================================== */
+
+.welcome-screen {
+  display: none;
+  min-height: 100vh;
+  padding: 0;
+  /* Override the standard screen padding for a centered hero feel */
+}
+
+.welcome-screen.active {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.welcome-content {
+  max-width: 440px;
+  width: 100%;
+  padding: calc(var(--safe-top) + 3rem) 1.75rem calc(var(--safe-bottom) + 2rem);
+  text-align: center;
+}
+
+.welcome-eyebrow {
+  font-size: 0.9rem;
+  color: var(--ink-mute);
+  margin: 0 0 0.25rem;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+.welcome-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 3.2rem;
+  line-height: 1;
+  margin: 0;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+  font-variation-settings: 'opsz' 144;
+}
+
+.welcome-mark {
+  width: 56px;
+  height: 4px;
+  margin: 1.25rem auto 1.75rem;
+  background: linear-gradient(90deg, var(--sage) 0%, var(--terracotta) 100%);
+  border-radius: 2px;
+}
+
+.welcome-lead {
+  font-size: 1.05rem;
+  line-height: 1.55;
+  color: var(--ink);
+  margin: 0 0 1.1rem;
+  font-weight: 500;
+}
+
+.welcome-body {
+  font-size: 0.98rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin: 0 0 1.5rem;
+}
+
+.welcome-emergency {
+  background: var(--terracotta-tint);
+  border: 1px solid var(--terracotta-soft);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1rem;
+  font-size: 0.92rem;
+  color: var(--terracotta-deep);
+  font-weight: 600;
+  margin: 0 0 2rem;
+}
+
+.welcome-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+/* =====================================================
+   About page
+   ===================================================== */
+
+.about-content {
+  padding: 0 0.25rem;
+}
+
+.about-content p {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  margin: 0 0 0.85rem;
+}
+
+.about-content p strong {
+  color: var(--ink);
+}
+
+.about-section-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 1.25rem;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+  margin: 1.6rem 0 0.65rem;
+}
+
+.about-section-title:first-child {
+  margin-top: 0.5rem;
+}
+
+.about-subhead {
+  margin-top: 0.75rem !important;
+  margin-bottom: 0.25rem !important;
+  color: var(--ink) !important;
+}
+
+.about-version {
+  text-align: center;
+  margin: 1rem 0 1.5rem;
+}
+
+/* Subtle text-only button (used for "About KetoCare" link in Settings) */
+.btn-link {
+  background: transparent;
+  border: none;
+  color: var(--sage-deep);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0.85rem 0;
+  text-align: center;
+  width: 100%;
+  border-radius: var(--radius-md);
+  transition: background 0.15s ease;
+}
+
+.btn-link:active { background: var(--sage-tint); }
+
+/* =====================================================
    Responsive — desktop adjustments
    ===================================================== */
 

@@ -17,6 +17,40 @@
 </head>
 <body>
 
+  <!-- Update banner — shown when a new version is waiting -->
+  <div class="update-banner" id="updateBanner" role="status" aria-live="polite">
+    <span class="update-banner-text">An update is ready</span>
+    <button class="update-banner-btn" id="updateBannerBtn">Refresh</button>
+  </div>
+
+  <!-- ========================================================== -->
+  <!-- WELCOME SCREEN (first launch)                              -->
+  <!-- ========================================================== -->
+  <section class="screen welcome-screen" data-screen="welcome">
+    <div class="welcome-content">
+      <p class="welcome-eyebrow">Welcome to</p>
+      <h1 class="welcome-title">KetoCare</h1>
+      <div class="welcome-mark"></div>
+
+      <p class="welcome-lead">
+        KetoCare helps parents and carers keep track of their child's ketones, glucose, and seizures while on a ketogenic diet for epilepsy.
+      </p>
+
+      <p class="welcome-body">
+        It's a personal record-keeping tool, not medical advice. Decisions about diet, medication, and care should always be made with your child's clinical team.
+      </p>
+
+      <p class="welcome-emergency">
+        In an emergency, follow your child's emergency care plan.
+      </p>
+
+      <div class="welcome-actions">
+        <button class="btn-ghost" id="welcomeLearnMoreBtn">Learn more</button>
+        <button class="btn-primary" id="welcomeGotItBtn">Got it</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ========================================================== -->
   <!-- HOME SCREEN                                                 -->
   <!-- ========================================================== -->
@@ -396,18 +430,18 @@
       </div>
 
       <div class="export-buttons">
-        <button class="btn-secondary" id="exportCSVBtn">
-          <span class="export-icon">XLS</span>
-          <span>
-            <span class="btn-title">Spreadsheet</span>
-            <span class="btn-sub">summary, daily, full log — opens in Excel</span>
-          </span>
-        </button>
         <button class="btn-secondary" id="exportPDFBtn">
           <span class="export-icon">PDF</span>
           <span>
-            <span class="btn-title">Clinic summary</span>
-            <span class="btn-sub">stats, charts, full event log</span>
+            <span class="btn-title">Summary report</span>
+            <span class="btn-sub">printable · charts, stats, event log</span>
+          </span>
+        </button>
+        <button class="btn-secondary" id="exportCSVBtn">
+          <span class="export-icon">XLS</span>
+          <span>
+            <span class="btn-title">Detailed records</span>
+            <span class="btn-sub">editable · all entries, sortable</span>
           </span>
         </button>
         <button class="btn-secondary" id="exportJSONBtn">
@@ -528,8 +562,64 @@
 
       <div class="divider"></div>
 
+      <button type="button" class="btn-link" data-go="about">About KetoCare</button>
+
       <button type="button" class="btn-danger" id="clearDataBtn">Clear all data</button>
     </form>
+  </section>
+
+  <!-- ========================================================== -->
+  <!-- ABOUT SCREEN                                                -->
+  <!-- ========================================================== -->
+  <section class="screen" data-screen="about">
+    <header class="screen-header">
+      <button class="icon-btn back-btn" data-go="settings" aria-label="Back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <h2>About</h2>
+      <span></span>
+    </header>
+
+    <div class="about-content">
+      <h3 class="about-section-title">What this app is</h3>
+      <p>A simple tool for parents and carers to record their child's ketones, glucose, and seizures during ketogenic diet therapy for epilepsy. It generates summaries that can be shared with your dietitian or neurologist at clinic appointments.</p>
+
+      <h3 class="about-section-title">What it isn't</h3>
+      <p>KetoCare doesn't give medical advice. It doesn't tell you when to adjust your child's diet, when to give rescue medication, or when to seek urgent care. Those decisions belong with your child's clinical team and your written care plan.</p>
+
+      <h3 class="about-section-title">How to use it</h3>
+
+      <p class="about-subhead"><strong>Logging measurements</strong></p>
+      <p>Tap <em>Log measurement</em> to record a ketone or glucose reading. Choose blood or urine ketone. If you enter both blood ketone and glucose, the GKI is calculated automatically.</p>
+
+      <p class="about-subhead"><strong>Logging seizures</strong></p>
+      <p>Tap <em>Log seizure</em> to start a timer when a seizure begins, and tap <em>Stop</em> when it ends. You can then add the type, possible triggers, and any rescue medication given. If the seizure has already happened, tap <em>Manual entry</em> instead.</p>
+
+      <p class="about-subhead"><strong>History and trends</strong></p>
+      <p><em>History</em> shows everything you've logged, day by day. Tap any entry to edit it. <em>Trends</em> shows charts and statistics over the last 7, 30, or 90 days.</p>
+
+      <p class="about-subhead"><strong>Sharing with your dietitian</strong></p>
+      <p><em>Export</em> lets you download a Summary report (PDF, good for clinic) or Detailed records (spreadsheet, good for closer review). You can email these or share them however you'd normally share documents.</p>
+
+      <p class="about-subhead"><strong>Settings</strong></p>
+      <p>Set your child's name, target ranges, and reminder times in Settings. Targets and reminder times are usually agreed with your dietitian.</p>
+
+      <h3 class="about-section-title">In an emergency</h3>
+      <p>Follow your child's emergency care plan. If you don't have one, or you're unsure what to do, contact your local emergency services straight away.</p>
+
+      <h3 class="about-section-title">Your data</h3>
+      <p>Everything you log stays on this device. Nothing is uploaded, sent, or shared automatically. The only way data leaves your phone is when you choose to export it (as a PDF, spreadsheet, or backup file) and share it yourself.</p>
+      <p>If you delete this app, or clear your browser data, the entries are gone. Use the Backup option periodically if you want to be able to restore your records on a new device.</p>
+
+      <h3 class="about-section-title">Feedback</h3>
+      <p>If you spot a problem or have a suggestion, please let your dietitian know — they may be able to pass it on.</p>
+
+      <div class="divider"></div>
+
+      <button type="button" class="btn-ghost" id="showWelcomeAgainBtn">Show welcome screen again</button>
+
+      <p class="about-version muted small">KetoCare · Version 1.0</p>
+    </div>
   </section>
 
   <!-- ========================================================== -->

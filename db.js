@@ -59,7 +59,8 @@ const DEFAULT_SETTINGS = {
   ketoneMax: 5,
   gkiMin: 1,
   gkiMax: 6,
-  reminders: [] // ['07:00', '12:00']
+  reminders: [], // ['07:00', '12:00']
+  welcomeDismissed: false
 };
 
 async function getSettings() {

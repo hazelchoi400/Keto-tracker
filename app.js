@@ -863,14 +863,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Export buttons
   document.getElementById('exportCSVBtn').addEventListener('click', async () => {
     const { fromMs, toMs } = getExportRange();
-    await KCExport.exportCSV(fromMs, toMs);
-    toast('Data downloaded');
+    await KCExport.exportXLSX(fromMs, toMs);
+    toast('Spreadsheet downloaded');
   });
   document.getElementById('exportPDFBtn').addEventListener('click', async () => {
     const { fromMs, toMs } = getExportRange();
-    // Render trends so charts exist on the canvas
-    state.selectedTrendRange = Math.max(7, Math.ceil((toMs - fromMs) / 86400000));
-    await renderTrends();
+    toast('Generating PDF…');
     await KCExport.exportPDF(fromMs, toMs);
     toast('PDF downloaded');
   });

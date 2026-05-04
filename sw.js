@@ -3,7 +3,7 @@
    Caches app shell + CDN scripts so the app works offline
    ===================================================== */
 
-const CACHE_NAME = 'ketocare-v1';
+const CACHE_NAME = 'ketocare-v2';
 
 // Files to cache on install. Same-origin paths are relative; CDN URLs are absolute.
 const PRECACHE = [
@@ -17,7 +17,7 @@ const PRECACHE = [
   './manifest.json',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
-  'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+  'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'
 ];
 
 self.addEventListener('install', (event) => {

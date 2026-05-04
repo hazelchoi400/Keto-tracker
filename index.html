@@ -8,6 +8,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <title>KetoCare — Paediatric Ketogenic Diet Tracker</title>
   <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="icon" type="image/png" href="icon-192.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -395,10 +397,10 @@
 
       <div class="export-buttons">
         <button class="btn-secondary" id="exportCSVBtn">
-          <span class="export-icon">CSV</span>
+          <span class="export-icon">XLS</span>
           <span>
-            <span class="btn-title">Research data (zip)</span>
-            <span class="btn-sub">measurements, seizures, daily summary</span>
+            <span class="btn-title">Spreadsheet</span>
+            <span class="btn-sub">summary, daily, full log — opens in Excel</span>
           </span>
         </button>
         <button class="btn-secondary" id="exportPDFBtn">
@@ -537,7 +539,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="db.js"></script>
   <script src="charts.js"></script>
   <script src="export.js"></script>

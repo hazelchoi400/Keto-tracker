@@ -23,7 +23,7 @@ The PWA manifest references `icon-192.png` and `icon-512.png` but they're not in
 | `styles.css` | Design tokens + all styling |
 | `db.js` | IndexedDB wrapper (settings, measurements, seizures) |
 | `charts.js` | Chart.js config + line/bar charts |
-| `export.js` | CSV (research zip), PDF clinic summary, JSON backup/restore |
+| `export.js` | XLSX clinic spreadsheet, PDF clinic summary, JSON backup/restore |
 | `app.js` | All UI logic — navigation, forms, timer, settings |
 | `sw.js` | Service worker — caches everything for offline use |
 | `manifest.json` | PWA manifest |
@@ -31,7 +31,7 @@ The PWA manifest references `icon-192.png` and `icon-512.png` but they're not in
 External dependencies (loaded via CDN, then cached locally by the service worker):
 - Chart.js 4.4.0
 - jsPDF 2.5.1
-- JSZip 3.10.1
+- SheetJS (xlsx) 0.18.5
 - Google Fonts (Fraunces, Manrope)
 
 ## What's included (v1)
@@ -44,7 +44,7 @@ External dependencies (loaded via CDN, then cached locally by the service worker
 - History with daily grouping, filters, tap-to-edit, swipe-to-delete
 - Trends — 7d / 30d / 90d view with stat cards (min/max/mean/n) and four charts
 - Target-band shading on ketone and GKI charts
-- **Research-grade data export** — zip containing tidy-format `measurements.csv`, `seizures.csv` (with each seizure linked to its nearest prior and subsequent ketone reading for proximity analysis), `daily_summary.csv`, and a `README_data.txt` data dictionary
+- **Spreadsheet export (XLSX)** — single Excel file with five tabs: Summary, Daily, Measurements, Seizures, About. Designed for clinic use — opens in Excel/Numbers, with conditional flags for in-target readings and each seizure linked to the nearest ketone reading on either side
 - PDF clinic summary (header, stats, embedded chart images, full event log)
 - JSON backup/restore (full app state)
 - Local notification reminders (multiple per day)

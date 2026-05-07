@@ -372,11 +372,19 @@
       </div>
     </div>
 
+    <div class="filter-row">
+      <div class="chip-group" data-field="trendView">
+        <button type="button" class="chip selected" data-value="combined">Combined</button>
+        <button type="button" class="chip" data-value="split">AM vs PM</button>
+      </div>
+    </div>
+
     <div class="stat-grid" id="statGrid"></div>
 
     <div class="chart-card">
       <h3>Ketone <span class="muted">mmol/L</span></h3>
       <div class="chart-canvas-wrap"><canvas id="chartKetone"></canvas></div>
+      <p class="chart-note muted small" id="ketoneSeizureMarkerNote">Terracotta dots along the bottom mark the days a seizure was logged.</p>
     </div>
 
     <div class="chart-card">
@@ -392,6 +400,12 @@
     <div class="chart-card">
       <h3>Seizure frequency</h3>
       <div class="chart-canvas-wrap"><canvas id="chartSeizures"></canvas></div>
+    </div>
+
+    <div class="chart-card">
+      <h3>Seizures by hour of day</h3>
+      <div class="chart-canvas-wrap"><canvas id="chartSeizuresByHour"></canvas></div>
+      <p class="chart-note muted small">Descriptive only. Showing when seizures occurred over the selected period — there is no established time-of-day pattern in research.</p>
     </div>
 
     <nav class="bottom-nav">
@@ -427,16 +441,17 @@
     </header>
 
     <div class="form">
-      <p class="muted">Choose a date range and format. Files will download to your device — share by email, AirDrop, or upload to your dietitian.</p>
+      <p class="muted">Choose a date range, then export. Files download to your device.</p>
 
-      <div class="field">
-        <label>From</label>
-        <input type="date" id="exportFrom" />
-      </div>
-
-      <div class="field">
-        <label>To</label>
-        <input type="date" id="exportTo" />
+      <div class="field-row">
+        <div class="field">
+          <label>From</label>
+          <input type="date" id="exportFrom" />
+        </div>
+        <div class="field">
+          <label>To</label>
+          <input type="date" id="exportTo" />
+        </div>
       </div>
 
       <div class="export-buttons">
@@ -463,10 +478,9 @@
         </button>
       </div>
 
-      <div class="divider"></div>
-
+      <p class="section-heading">Restore from backup</p>
+      <p class="muted small">Pick a JSON backup file you saved earlier to replace the current data on this device.</p>
       <div class="field">
-        <label>Restore from backup</label>
         <input type="file" id="importJSON" accept="application/json" />
       </div>
     </div>

@@ -546,27 +546,34 @@ async function exportPDF(fromMs, toMs) {
   doc.setTextColor(45, 42, 38);
   y += 8;
 
-  // Charts — render fresh to off-screen canvases so this works regardless of which screen the user is on.
-  // Same morning/evening split as the in-app Trends view.
-  const ketoneSeries  = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
-  const glucoseSeries = KCCharts.morningEveningSeries(measurements, 'glucose', fromMs, toMs);
-  const gkiSeries     = KCCharts.morningEveningSeries(
+  // Charts — render fresh to off-screen canvases so this works regardless of
+  // which screen the user is on. The PDF uses combined-mode (single line per
+  // chart, all readings on a day averaged) to match the default in-app view.
+  const ketoneSeries  = KCCharts.dailySeries(measurements, 'bloodKetone', fromMs, toMs);
+  const glucoseSeries = KCCharts.dailySeries(measurements, 'glucose', fromMs, toMs);
+  const gkiSeries     = KCCharts.dailySeries(
     measurements,
     (r) => (r.bloodKetone && r.glucose && r.bloodKetone > 0 ? r.glucose / r.bloodKetone : null),
     fromMs, toMs
   );
   const seizureSeries = KCCharts.dailyCounts(seizures, fromMs, toMs);
+  const seizureMarkers = KCCharts.seizureDayMarkers(seizures, fromMs, toMs);
+  const hourSeries = KCCharts.seizuresByHour(seizures);
 
-  y = await renderOffscreenLineChartToPDF(doc, 'Ketone trend (mmol/L)', y, MARGIN, PAGE_W,
-    ketoneSeries, KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep,
-    (settings.ketoneMin && settings.ketoneMax) ? { min: settings.ketoneMin, max: settings.ketoneMax } : null);
-  y = await renderOffscreenLineChartToPDF(doc, 'Glucose trend (mmol/L)', y, MARGIN, PAGE_W,
-    glucoseSeries, KCCharts.COLORS.honey, KCCharts.COLORS.honeyDeep, null);
-  y = await renderOffscreenLineChartToPDF(doc, 'GKI trend', y, MARGIN, PAGE_W,
-    gkiSeries, KCCharts.COLORS.terra, KCCharts.COLORS.terraDeep,
-    (settings.gkiMin != null && settings.gkiMax != null) ? { min: settings.gkiMin, max: settings.gkiMax } : null);
+  y = await renderOffscreenCombinedLineChartToPDF(doc, 'Ketone trend (mmol/L)', y, MARGIN, PAGE_W,
+    ketoneSeries, KCCharts.COLORS.sageDeep,
+    (settings.ketoneMin && settings.ketoneMax) ? { min: settings.ketoneMin, max: settings.ketoneMax } : null,
+    seizureMarkers);
+  y = await renderOffscreenCombinedLineChartToPDF(doc, 'Glucose trend (mmol/L)', y, MARGIN, PAGE_W,
+    glucoseSeries, KCCharts.COLORS.honey, null, null);
+  y = await renderOffscreenCombinedLineChartToPDF(doc, 'GKI trend', y, MARGIN, PAGE_W,
+    gkiSeries, KCCharts.COLORS.terra,
+    (settings.gkiMin != null && settings.gkiMax != null) ? { min: settings.gkiMin, max: settings.gkiMax } : null,
+    null);
   y = await renderOffscreenBarChartToPDF(doc, 'Seizure frequency', y, MARGIN, PAGE_W,
     seizureSeries.labels, seizureSeries.data, KCCharts.COLORS.terraDeep);
+  y = await renderOffscreenHourHistogramToPDF(doc, 'Seizures by hour of day', y, MARGIN, PAGE_W,
+    hourSeries.data, KCCharts.COLORS.terraDeep);
 
   // Event log on a new page
   doc.addPage();
@@ -663,12 +670,12 @@ async function exportPDF(fromMs, toMs) {
 }
 
 /**
- * Off-screen morning/evening line chart for PDF embedding.
- * `series` = { labels, morning[], evening[] } from KCCharts.morningEveningSeries.
- * Y-axis auto-fits both data and target band so values above the band stay visible
- * (fix for the v1.0 issue where >5 mmol/L readings were clipped).
+ * Off-screen combined-mode line chart for PDF embedding.
+ * `series` = { labels, data } from KCCharts.dailySeries.
+ * `markers` = optional [{index, count}] for terracotta seizure-day dots along baseline.
+ * Y-axis auto-fits both data and target band so values above the band stay visible.
  */
-async function renderOffscreenLineChartToPDF(doc, title, y, margin, pageW, series, colorMorning, colorEvening, targetBand) {
+async function renderOffscreenCombinedLineChartToPDF(doc, title, y, margin, pageW, series, color, targetBand, markers) {
   const imgW = pageW - margin * 2;
   const imgH = 60;
 
@@ -682,41 +689,27 @@ async function renderOffscreenLineChartToPDF(doc, title, y, margin, pageW, serie
 
   const canvas = document.createElement('canvas');
   canvas.width = 1200;
-  canvas.height = 520;
+  canvas.height = 480;
   canvas.style.position = 'fixed';
   canvas.style.left = '-9999px';
   canvas.style.top = '0';
   canvas.style.width = '1200px';
-  canvas.style.height = '520px';
+  canvas.style.height = '480px';
   document.body.appendChild(canvas);
 
   try {
     const datasets = [
       {
-        label: 'Morning',
-        data: series.morning,
-        borderColor: colorMorning,
-        backgroundColor: colorMorning + '22',
+        label: 'Reading',
+        data: series.data,
+        borderColor: color,
+        backgroundColor: color + '33',
         borderWidth: 2.5,
         tension: 0.35,
         pointRadius: 3,
-        pointBackgroundColor: colorMorning,
+        pointBackgroundColor: color,
         spanGaps: true,
-        fill: false,
-        order: 1
-      },
-      {
-        label: 'Evening',
-        data: series.evening,
-        borderColor: colorEvening,
-        backgroundColor: colorEvening + '22',
-        borderWidth: 2.5,
-        borderDash: [6, 5],
-        tension: 0.35,
-        pointRadius: 3,
-        pointBackgroundColor: colorEvening,
-        spanGaps: true,
-        fill: false,
+        fill: true,
         order: 1
       }
     ];
@@ -744,8 +737,22 @@ async function renderOffscreenLineChartToPDF(doc, title, y, margin, pageW, serie
       });
     }
 
-    const allVals = [...series.morning, ...series.evening];
-    const yMax = KCCharts.suggestedYMax(allVals, targetBand);
+    if (markers && markers.length) {
+      const points = markers.map(m => ({ x: series.labels[m.index], y: 0 }));
+      datasets.push({
+        label: '_seizureMarkers',
+        data: points,
+        type: 'scatter',
+        borderColor: 'transparent',
+        backgroundColor: '#a85a48',
+        pointStyle: 'circle',
+        pointRadius: 5,
+        showLine: false,
+        order: 0
+      });
+    }
+
+    const yMax = KCCharts.suggestedYMax(series.data, targetBand);
 
     const chart = new Chart(canvas, {
       type: 'line',
@@ -754,16 +761,7 @@ async function renderOffscreenLineChartToPDF(doc, title, y, margin, pageW, serie
         responsive: false,
         animation: false,
         maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: true,
-            position: 'bottom',
-            labels: {
-              boxWidth: 18, boxHeight: 14, padding: 16, font: { size: 16 },
-              filter: (item) => !item.text || !item.text.startsWith('_target')
-            }
-          }
-        },
+        plugins: { legend: { display: false } },
         scales: {
           x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8, font: { size: 16 } } },
           y: { beginAtZero: true, suggestedMax: yMax, grid: { color: '#e3d8c5' }, ticks: { font: { size: 16 } } }
@@ -852,6 +850,94 @@ async function renderOffscreenBarChartToPDF(doc, title, y, margin, pageW, labels
   }
 
   return y + imgH + 6;
+}
+
+/**
+ * Off-screen 24-hour histogram for PDF embedding.
+ * `data` = 24-element count array from KCCharts.seizuresByHour.
+ * Mirrors the in-app hourHistogramChart styling (sparse axis labels at 0/6/12/18).
+ */
+async function renderOffscreenHourHistogramToPDF(doc, title, y, margin, pageW, data, color) {
+  const imgW = pageW - margin * 2;
+  const imgH = 50;
+
+  if (y + imgH + 14 > 280) { doc.addPage(); y = margin; }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(45, 42, 38);
+  doc.text(title, margin, y);
+  y += 4;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 380;
+  canvas.style.position = 'fixed';
+  canvas.style.left = '-9999px';
+  canvas.style.top = '0';
+  canvas.style.width = '1200px';
+  canvas.style.height = '380px';
+  document.body.appendChild(canvas);
+
+  try {
+    const labels = data.map((_, h) => String(h));
+    const majorTicks = new Set([0, 6, 12, 18]);
+
+    const chart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          data,
+          backgroundColor: color,
+          borderRadius: 4,
+          maxBarThickness: 18
+        }]
+      },
+      options: {
+        responsive: false,
+        animation: false,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              maxRotation: 0,
+              autoSkip: false,
+              font: { size: 16 },
+              callback: function(_, index) {
+                return majorTicks.has(index) ? `${index}:00` : '';
+              }
+            }
+          },
+          y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0, font: { size: 16 } }, grid: { color: '#e3d8c5' } }
+        }
+      }
+    });
+
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const dataUrl = canvas.toDataURL('image/png', 1.0);
+    doc.addImage(dataUrl, 'PNG', margin, y, imgW, imgH);
+    chart.destroy();
+  } catch (err) {
+    console.warn('Chart render failed:', err);
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(9);
+    doc.setTextColor(138, 130, 120);
+    doc.text('(Chart not available)', margin, y + 5);
+  } finally {
+    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+  }
+
+  // Small descriptive footnote under the histogram
+  y += imgH + 3;
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(8);
+  doc.setTextColor(138, 130, 120);
+  doc.text('Descriptive only — there is no established time-of-day pattern in research.', margin, y);
+
+  return y + 5;
 }
 
 function formatVariant(v, settings) {

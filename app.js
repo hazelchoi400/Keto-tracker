@@ -19,6 +19,8 @@ const state = {
   selectedUrineKetone: null,
   selectedHistoryFilter: 'all',
   selectedTrendRange: 30,
+  // 'combined' (single line per chart, default) or 'split' (AM vs PM)
+  selectedTrendView: 'combined',
   selectedSettingVariant: 'classical-4-1',
   selectedSettingDefaultKetone: 'blood'
 };
@@ -741,37 +743,74 @@ async function renderTrends() {
     </div>
   `;
 
-  // Charts — morning vs evening split (00:00–11:59 vs 12:00–23:59)
-  const ketoneSeries  = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
-  const glucoseSeries = KCCharts.morningEveningSeries(measurements, 'glucose', fromMs, toMs);
-  const gkiSeries     = KCCharts.morningEveningSeries(
-    measurements,
-    (r) => (r.bloodKetone && r.glucose ? r.glucose / r.bloodKetone : null),
-    fromMs, toMs
-  );
-  const seizureSeries = KCCharts.dailyCounts(seizures, fromMs, toMs);
-
+  // Charts
   const settings = state.settings || await KCDB.getSettings();
+  const ketoneTarget = (settings.ketoneMin && settings.ketoneMax)
+    ? { min: settings.ketoneMin, max: settings.ketoneMax } : null;
+  const gkiTarget = (settings.gkiMin != null && settings.gkiMax != null)
+    ? { min: settings.gkiMin, max: settings.gkiMax } : null;
 
-  KCCharts.lineChartSplit(
-    'chartKetone',
-    ketoneSeries,
-    KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep,
-    (settings.ketoneMin && settings.ketoneMax) ? { min: settings.ketoneMin, max: settings.ketoneMax } : null
-  );
-  KCCharts.lineChartSplit(
-    'chartGlucose',
-    glucoseSeries,
-    KCCharts.COLORS.honey, KCCharts.COLORS.honeyDeep,
-    null
-  );
-  KCCharts.lineChartSplit(
-    'chartGKI',
-    gkiSeries,
-    KCCharts.COLORS.terra, KCCharts.COLORS.terraDeep,
-    (settings.gkiMin != null && settings.gkiMax != null) ? { min: settings.gkiMin, max: settings.gkiMax } : null
-  );
+  // Seizure-day markers (used as small dots along the bottom of the ketone chart)
+  const seizureMarkers = KCCharts.seizureDayMarkers(seizures, fromMs, toMs);
+
+  // Toggle a small note line beneath the ketone chart depending on whether
+  // there are any markers to explain
+  const noteEl = document.getElementById('ketoneSeizureMarkerNote');
+  if (noteEl) noteEl.classList.toggle('hidden', seizureMarkers.length === 0);
+
+  if (state.selectedTrendView === 'split') {
+    const ketoneSeries  = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
+    const glucoseSeries = KCCharts.morningEveningSeries(measurements, 'glucose', fromMs, toMs);
+    const gkiSeries     = KCCharts.morningEveningSeries(
+      measurements,
+      (r) => (r.bloodKetone && r.glucose ? r.glucose / r.bloodKetone : null),
+      fromMs, toMs
+    );
+    KCCharts.lineChartSplit(
+      'chartKetone', ketoneSeries,
+      KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep,
+      ketoneTarget,
+      { markers: seizureMarkers }
+    );
+    KCCharts.lineChartSplit(
+      'chartGlucose', glucoseSeries,
+      KCCharts.COLORS.honey, KCCharts.COLORS.honeyDeep,
+      null
+    );
+    KCCharts.lineChartSplit(
+      'chartGKI', gkiSeries,
+      KCCharts.COLORS.terra, KCCharts.COLORS.terraDeep,
+      gkiTarget
+    );
+  } else {
+    // Combined: single line per chart, all readings on a day averaged
+    const ketoneSeries  = KCCharts.dailySeries(measurements, 'bloodKetone', fromMs, toMs);
+    const glucoseSeries = KCCharts.dailySeries(measurements, 'glucose', fromMs, toMs);
+    const gkiSeries     = KCCharts.dailySeries(
+      measurements,
+      (r) => (r.bloodKetone && r.glucose ? r.glucose / r.bloodKetone : null),
+      fromMs, toMs
+    );
+    KCCharts.lineChartCombined(
+      'chartKetone', ketoneSeries, KCCharts.COLORS.sageDeep,
+      ketoneTarget, seizureMarkers, { label: 'Ketone' }
+    );
+    KCCharts.lineChartCombined(
+      'chartGlucose', glucoseSeries, KCCharts.COLORS.honey,
+      null, null, { label: 'Glucose' }
+    );
+    KCCharts.lineChartCombined(
+      'chartGKI', gkiSeries, KCCharts.COLORS.terra,
+      gkiTarget, null, { label: 'GKI' }
+    );
+  }
+
+  const seizureSeries = KCCharts.dailyCounts(seizures, fromMs, toMs);
   KCCharts.barChart('chartSeizures', seizureSeries.labels, seizureSeries.data, KCCharts.COLORS.terraDeep);
+
+  // Hour-of-day histogram — descriptive only
+  const hourSeries = KCCharts.seizuresByHour(seizures);
+  KCCharts.hourHistogramChart('chartSeizuresByHour', hourSeries.data, KCCharts.COLORS.terraDeep);
 }
 
 /* =====================================================
@@ -1033,6 +1072,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Trends range
   setupChipGroup('trendRange', false, (v) => {
     state.selectedTrendRange = parseInt(v, 10);
+    renderTrends();
+  });
+  // Trends view: combined (single line) or split (AM vs PM)
+  setupChipGroup('trendView', false, (v) => {
+    state.selectedTrendView = v;
     renderTrends();
   });
 

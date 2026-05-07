@@ -538,6 +538,11 @@ body::before {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Two filter-rows stacked (e.g. range + view on Trends): tighter gap */
+.filter-row + .filter-row {
+  margin-top: -0.4rem;
+}
+
 .filter-row .chip-group {
   flex-wrap: nowrap;
   width: max-content;
@@ -874,6 +879,12 @@ body::before {
   position: relative;
   height: 200px;
   width: 100%;
+}
+
+/* Small explanatory text shown under a chart (e.g. seizure-marker note) */
+.chart-note {
+  margin: 0.65rem 0 0.15rem;
+  line-height: 1.45;
 }
 
 /* =====================================================

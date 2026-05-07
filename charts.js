@@ -213,6 +213,25 @@ function lineChartSplit(canvasId, series, colorMorning, colorEvening, targetBand
     });
   }
 
+  // Seizure markers along the baseline (optional)
+  if (opts.markers && opts.markers.length) {
+    const points = opts.markers.map(m => ({ x: series.labels[m.index], y: 0 }));
+    datasets.push({
+      label: '_seizureMarkers',
+      data: points,
+      type: 'scatter',
+      borderColor: 'transparent',
+      backgroundColor: CHART_COLORS.terraDeep,
+      pointStyle: 'circle',
+      pointRadius: 4,
+      pointHoverRadius: 5,
+      pointBorderColor: '#fffaf2',
+      pointBorderWidth: 1,
+      showLine: false,
+      order: 0
+    });
+  }
+
   // Combine all real values to compute a proper y-max
   const allVals = [...series.morning, ...series.evening];
   const yMax = suggestedYMax(allVals, targetBand);
@@ -235,15 +254,15 @@ function lineChartSplit(canvasId, series, colorMorning, colorEvening, targetBand
       plugins: {
         legend: {
           labels: {
-            // Hide the target-band entries from the legend
-            filter: (item) => !item.text || !item.text.startsWith('_target')
+            // Hide internal-only datasets from the legend
+            filter: (item) => !item.text || !item.text.startsWith('_')
           }
         },
         tooltip: {
-          // Hide target-band entries from the tooltip
+          // Hide internal-only datasets from the tooltip
           filter: (tooltipItem) => {
             const label = tooltipItem.dataset.label || '';
-            return !label.startsWith('_target');
+            return !label.startsWith('_');
           },
           callbacks: {
             label: (ctx) => {
@@ -290,6 +309,60 @@ function barChart(canvasId, labels, data, color) {
   });
 }
 
+/**
+ * Hour-of-day histogram (0–23). Used for the descriptive
+ * "Seizures by hour of day" chart on Trends.
+ */
+function hourHistogramChart(canvasId, data, color) {
+  applyChartDefaults();
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  const labels = data.map((_, h) => String(h));
+  // Show only major ticks: 0, 6, 12, 18 — keeps the axis legible
+  const majorTicks = new Set([0, 6, 12, 18]);
+  _charts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Seizures',
+        data,
+        backgroundColor: color,
+        borderRadius: 4,
+        borderSkipped: false,
+        maxBarThickness: 14
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => `${items[0].label}:00`,
+            label: (item) => `${item.parsed.y} seizure${item.parsed.y === 1 ? '' : 's'}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: {
+            maxRotation: 0,
+            autoSkip: false,
+            callback: function(_, index) {
+              return majorTicks.has(index) ? `${index}:00` : '';
+            }
+          }
+        },
+        y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 }, grid: { color: CHART_COLORS.line } }
+      }
+    }
+  });
+}
+
 function computeStats(values) {
   const filt = values.filter(v => v != null && !isNaN(v));
   if (!filt.length) return { min: '—', max: '—', mean: '—', median: '—', count: 0 };
@@ -307,6 +380,187 @@ function computeStats(values) {
 }
 
 /* =====================================================
+   Combined daily series (single line, no AM/PM split)
+
+   Returns { labels, data } — data[i] is the mean of all readings on day i,
+   or null if there were none.
+   ===================================================== */
+function dailySeries(records, valueKey, fromMs, toMs) {
+  const days = {};
+  for (let t = fromMs; t <= toMs; t += 86400000) {
+    const d = new Date(t); d.setHours(0,0,0,0);
+    days[d.getTime()] = [];
+  }
+  for (const r of records) {
+    const ts = r.timestamp || r.startTime;
+    const d = new Date(ts);
+    const dayKey = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    if (days[dayKey] === undefined) continue;
+    const v = typeof valueKey === 'function' ? valueKey(r) : r[valueKey];
+    if (v == null || isNaN(v)) continue;
+    days[dayKey].push(v);
+  }
+  const labels = [], data = [];
+  Object.keys(days).sort((a, b) => +a - +b).forEach(k => {
+    labels.push(formatDayLabel(+k));
+    const arr = days[k];
+    data.push(arr.length ? arr.reduce((a,b) => a+b, 0) / arr.length : null);
+  });
+  return { labels, data };
+}
+
+/* =====================================================
+   Seizure-day index: which days (by index in labels[]) had >=1 seizure.
+
+   Returns an array of { index, count } objects.
+   Useful for plotting markers along the x-axis of another chart whose
+   labels[] was produced by dailySeries / morningEveningSeries (same range).
+   ===================================================== */
+function seizureDayMarkers(seizures, fromMs, toMs) {
+  const days = {};
+  let i = 0;
+  for (let t = fromMs; t <= toMs; t += 86400000) {
+    const d = new Date(t); d.setHours(0,0,0,0);
+    days[d.getTime()] = { index: i++, count: 0 };
+  }
+  for (const s of seizures) {
+    const d = new Date(s.startTime); d.setHours(0,0,0,0);
+    if (days[d.getTime()] !== undefined) days[d.getTime()].count++;
+  }
+  return Object.values(days).filter(d => d.count > 0);
+}
+
+/* =====================================================
+   Seizures by hour of day (24-hour histogram)
+
+   Returns { labels: ['0','1',…,'23'], data: [counts] }
+   ===================================================== */
+function seizuresByHour(seizures) {
+  const counts = new Array(24).fill(0);
+  for (const s of seizures) {
+    const h = new Date(s.startTime).getHours();
+    counts[h]++;
+  }
+  const labels = counts.map((_, h) => String(h));
+  return { labels, data: counts };
+}
+
+/* =====================================================
+   Combined-mode line chart (single series + optional band + optional
+   seizure markers along the x-axis baseline)
+
+   `series` = { labels, data } from dailySeries
+   `color`  = main line colour
+   `targetBand` = { min, max } | null
+   `markers` = [{ index, count }] | null   — terracotta dots along baseline
+   ===================================================== */
+function lineChartCombined(canvasId, series, color, targetBand, markers, opts = {}) {
+  applyChartDefaults();
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+
+  const dataset = {
+    label: opts.label || 'Reading',
+    data: series.data,
+    borderColor: color,
+    backgroundColor: color + '22',
+    borderWidth: 2.5,
+    tension: 0.35,
+    pointRadius: 3,
+    pointBackgroundColor: color,
+    pointBorderColor: '#fffaf2',
+    pointBorderWidth: 1.5,
+    pointHoverRadius: 5,
+    spanGaps: true,
+    fill: true,
+    order: 1
+  };
+
+  const datasets = [dataset];
+
+  if (targetBand && targetBand.min != null && targetBand.max != null) {
+    datasets.push({
+      label: '_targetMax',
+      data: series.labels.map(() => targetBand.max),
+      borderColor: 'transparent',
+      backgroundColor: CHART_COLORS.sageSoft,
+      pointRadius: 0,
+      pointHoverRadius: 0,
+      fill: '+1',
+      tension: 0,
+      order: 99
+    });
+    datasets.push({
+      label: '_targetMin',
+      data: series.labels.map(() => targetBand.min),
+      borderColor: 'transparent',
+      backgroundColor: 'transparent',
+      pointRadius: 0,
+      pointHoverRadius: 0,
+      fill: false,
+      tension: 0,
+      order: 99
+    });
+  }
+
+  // Seizure markers — terracotta dots pinned at y=0, one per affected day.
+  // Using {x, y} point format on the same `labels` x-axis as the main data.
+  if (markers && markers.length) {
+    const points = markers.map(m => ({ x: series.labels[m.index], y: 0 }));
+    datasets.push({
+      label: '_seizureMarkers',
+      data: points,
+      type: 'scatter',
+      borderColor: 'transparent',
+      backgroundColor: CHART_COLORS.terraDeep,
+      pointStyle: 'circle',
+      pointRadius: 4,
+      pointHoverRadius: 5,
+      pointBorderColor: '#fffaf2',
+      pointBorderWidth: 1,
+      showLine: false,
+      order: 0
+    });
+  }
+
+  const yMax = suggestedYMax(series.data, targetBand);
+
+  _charts[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: { labels: series.labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { intersect: false, mode: 'index' },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 6 } },
+        y: { beginAtZero: true, suggestedMax: yMax, grid: { color: CHART_COLORS.line, drawBorder: false } }
+      },
+      plugins: {
+        legend: {
+          // Single-series chart — no legend needed for the main line, and we hide internals
+          display: false
+        },
+        tooltip: {
+          filter: (item) => {
+            const label = item.dataset.label || '';
+            return !label.startsWith('_');
+          },
+          callbacks: {
+            label: (ctx) => {
+              const label = ctx.dataset.label || '';
+              if (ctx.parsed.y == null) return `${label}: —`;
+              return `${label}: ${ctx.parsed.y.toFixed(2)}`;
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+/* =====================================================
    Exports
    ===================================================== */
 
@@ -315,9 +569,14 @@ window.KCCharts = {
   MORNING_END_HOUR,
   applyChartDefaults,
   morningEveningSeries,
+  dailySeries,
   dailyCounts,
+  seizureDayMarkers,
+  seizuresByHour,
   lineChartSplit,
+  lineChartCombined,
   barChart,
+  hourHistogramChart,
   computeStats,
   destroyChart,
   suggestedYMax

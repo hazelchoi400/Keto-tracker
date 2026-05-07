@@ -24,6 +24,29 @@ const state = {
 };
 
 /* =====================================================
+   Alert helpers — hyperketosis / hypoglycaemia
+
+   Thresholds come from settings (configurable per centre).
+   Defaults: ketone >= 6, glucose < 3.
+   ===================================================== */
+
+function isKetoneAlert(value, settings) {
+  if (value == null || isNaN(value)) return false;
+  const threshold = settings?.ketoneAlertHigh;
+  if (threshold == null) return false;
+  return value >= threshold;
+}
+
+function isGlucoseAlert(value, settings) {
+  if (value == null || isNaN(value)) return false;
+  const threshold = settings?.glucoseAlertLow;
+  if (threshold == null) return false;
+  return value < threshold;
+}
+
+const ALERT_MESSAGE = "Give treatment as per management plan.";
+
+/* =====================================================
    Toast
    ===================================================== */
 
@@ -131,22 +154,38 @@ async function renderHome() {
 
   const el = (id) => document.getElementById(id);
   const ketoneEl = el('todayKetone');
+  const ketoneStat = ketoneEl.parentElement;
+  ketoneStat.classList.remove('in-range', 'out-range', 'alert');
+
   if (lastWithBlood) {
     ketoneEl.textContent = lastWithBlood.bloodKetone.toFixed(1);
-    ketoneEl.parentElement.classList.toggle('in-range',
-      settings.ketoneMin && settings.ketoneMax &&
-      lastWithBlood.bloodKetone >= settings.ketoneMin &&
-      lastWithBlood.bloodKetone <= settings.ketoneMax);
-    ketoneEl.parentElement.classList.toggle('out-range',
-      settings.ketoneMin && settings.ketoneMax &&
-      (lastWithBlood.bloodKetone < settings.ketoneMin || lastWithBlood.bloodKetone > settings.ketoneMax));
+    const v = lastWithBlood.bloodKetone;
+    if (isKetoneAlert(v, settings)) {
+      ketoneStat.classList.add('alert');
+    } else if (settings.ketoneMin != null && settings.ketoneMax != null) {
+      if (v >= settings.ketoneMin && v <= settings.ketoneMax) {
+        ketoneStat.classList.add('in-range');
+      } else {
+        ketoneStat.classList.add('out-range');
+      }
+    }
   } else if (lastWithUrine) {
     ketoneEl.textContent = KCExport.urineLabel(lastWithUrine.urineKetone);
   } else {
     ketoneEl.textContent = '—';
   }
 
-  el('todayGlucose').textContent = lastGluc ? lastGluc.glucose.toFixed(1) : '—';
+  const glucoseEl = el('todayGlucose');
+  const glucoseStat = glucoseEl.parentElement;
+  glucoseStat.classList.remove('in-range', 'out-range', 'alert');
+  if (lastGluc) {
+    glucoseEl.textContent = lastGluc.glucose.toFixed(1);
+    if (isGlucoseAlert(lastGluc.glucose, settings)) {
+      glucoseStat.classList.add('alert');
+    }
+  } else {
+    glucoseEl.textContent = '—';
+  }
 
   // GKI from latest pair within ±30 min
   let gki = '—';
@@ -247,6 +286,9 @@ function populateSeizureForm(seizure) {
   document.getElementById('seizureDurationDisplay').textContent =
     seizure.durationSec ? `${min}m ${sec}s` : '0s';
 
+  // Re-render the chip group so user-defined custom types appear alongside the standard ones
+  renderSeizureTypeChips();
+
   // Reset chip selections
   document.querySelectorAll('.chip-group[data-field="seizureType"] .chip').forEach(c => c.classList.remove('selected'));
   document.querySelectorAll('.chip-group[data-field="seizureTriggers"] .chip').forEach(c => c.classList.remove('selected'));
@@ -255,9 +297,50 @@ function populateSeizureForm(seizure) {
   if (seizure.type) selectChipValue('seizureType', seizure.type);
   if (seizure.triggers) selectChipValues('seizureTriggers', seizure.triggers);
 
+  // "Other" free-text — only shown when type === 'other'
+  document.getElementById('seizureTypeOther').value = seizure.typeOther || '';
+  toggleSeizureTypeOtherField(state.selectedSeizureType === 'other');
+
   document.getElementById('seizureRescue').value  = seizure.rescueMed || '';
   document.getElementById('seizureRecovery').value = seizure.recoveryMin != null ? seizure.recoveryMin : '';
   document.getElementById('seizureNotes').value    = seizure.notes || '';
+}
+
+/**
+ * Render seizure-type chips: standard built-ins + user-defined custom labels.
+ * Custom labels are stored in state.settings.customSeizureTypes as plain strings.
+ * Their data-value uses the prefix "custom:" so we can recognise them later
+ * without colliding with the standard type values.
+ */
+function renderSeizureTypeChips() {
+  const group = document.querySelector('.chip-group[data-field="seizureType"]');
+  if (!group) return;
+
+  const STANDARD = [
+    { value: 'tonic-clonic', label: 'Tonic-clonic' },
+    { value: 'absence',      label: 'Absence' },
+    { value: 'myoclonic',    label: 'Myoclonic' },
+    { value: 'focal',        label: 'Focal' },
+    { value: 'drop',         label: 'Drop' }
+  ];
+  const customs = (state.settings?.customSeizureTypes || []).filter(s => s && s.trim());
+
+  // Rebuild HTML preserving the standard chips, custom chips between them and "Other"
+  const chips = [
+    ...STANDARD.map(t => `<button type="button" class="chip" data-value="${t.value}">${escapeHtml(t.label)}</button>`),
+    ...customs.map((label, i) =>
+      `<button type="button" class="chip" data-value="custom:${i}">${escapeHtml(label)}</button>`),
+    `<button type="button" class="chip" data-value="other">Other</button>`
+  ];
+  group.innerHTML = chips.join('\n');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+function toggleSeizureTypeOtherField(show) {
+  document.getElementById('seizureTypeOtherField').classList.toggle('hidden', !show);
 }
 
 async function handleSeizureSubmit(e) {
@@ -270,10 +353,14 @@ async function handleSeizureSubmit(e) {
   let durationSec = min * 60 + sec;
   if (!durationSec && state.pendingSeizure?.durationSec) durationSec = state.pendingSeizure.durationSec;
 
+  const typeOtherValue = document.getElementById('seizureTypeOther').value.trim();
+
   const record = {
     startTime,
     durationSec: durationSec || 0,
     type: state.selectedSeizureType,
+    // Free-text description, only meaningful when type === 'other'
+    typeOther: state.selectedSeizureType === 'other' ? typeOtherValue : '',
     triggers: state.selectedSeizureTriggers,
     rescueMed: document.getElementById('seizureRescue').value.trim(),
     recoveryMin: document.getElementById('seizureRecovery').value
@@ -308,6 +395,7 @@ function resetMeasurementForm() {
   document.getElementById('gkiValue').textContent = '—';
   document.getElementById('gkiHint').textContent = 'Enter blood ketone & glucose to calculate';
   document.getElementById('gkiPreview').classList.remove('in-range', 'out-range');
+  document.getElementById('measureAlert').classList.add('hidden');
 
   const method = state.settings?.defaultKetone || 'blood';
   state.selectedKetoneMethod = method;
@@ -353,6 +441,36 @@ function updateGKIPreview() {
     valEl.textContent = '—';
     hintEl.textContent = 'Enter blood ketone & glucose to calculate';
   }
+
+  // Evaluate alert thresholds and show banner if either is breached
+  updateMeasureAlertBanner(k, g);
+}
+
+function updateMeasureAlertBanner(k, g) {
+  const banner = document.getElementById('measureAlert');
+  const text   = document.getElementById('measureAlertText');
+  if (!banner || !text) return;
+  const settings = state.settings || {};
+
+  const ketoneHit  = !isNaN(k) && isKetoneAlert(k, settings);
+  const glucoseHit = !isNaN(g) && isGlucoseAlert(g, settings);
+
+  if (!ketoneHit && !glucoseHit) {
+    banner.classList.add('hidden');
+    return;
+  }
+
+  let title = '';
+  if (ketoneHit && glucoseHit) {
+    title = `Ketone ${k.toFixed(1)} mmol/L · Glucose ${g.toFixed(1)} mmol/L`;
+  } else if (ketoneHit) {
+    title = `High blood ketone (${k.toFixed(1)} mmol/L)`;
+  } else {
+    title = `Low glucose (${g.toFixed(1)} mmol/L)`;
+  }
+
+  text.innerHTML = `<strong>${title}</strong>${ALERT_MESSAGE}`;
+  banner.classList.remove('hidden');
 }
 
 async function handleMeasurementSubmit(e) {
@@ -473,19 +591,40 @@ function renderHistoryItem(ev) {
     const min = Math.floor((s.durationSec || 0) / 60);
     const sec = (s.durationSec || 0) % 60;
     const dur = `${min}m ${sec}s`;
+    const typeLabel = seizureTypeLabel(s);
     return `
       <div class="history-item" data-kind="seizure" data-id="${s.id}">
         <div class="history-icon seizure">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L4.09 12.97a1 1 0 0 0 .77 1.63H11l-1 7.4a.5.5 0 0 0 .9.34L20 11.4a1 1 0 0 0-.77-1.63H13.5L14.5 2.6a.5.5 0 0 0-.9-.34z" stroke-linejoin="round"/></svg>
         </div>
         <div class="history-body">
-          <p class="history-title">${(s.type || 'Seizure').charAt(0).toUpperCase() + (s.type || 'seizure').slice(1)} · ${dur}</p>
-          <p class="history-meta">${time}${s.rescueMed ? ' · rescue: ' + s.rescueMed : ''}</p>
+          <p class="history-title">${escapeHtml(typeLabel)} · ${dur}</p>
+          <p class="history-meta">${time}${s.rescueMed ? ' · rescue: ' + escapeHtml(s.rescueMed) : ''}</p>
         </div>
         <button class="history-delete" aria-label="Delete entry">×</button>
       </div>
     `;
   }
+}
+
+/**
+ * Resolve a human-readable label for a seizure record's type.
+ * - Standard types: capitalised value (e.g. 'tonic-clonic' → 'Tonic-clonic')
+ * - Custom types stored as 'custom:N': look up state.settings.customSeizureTypes[N]
+ * - 'other' with a typeOther string: use the free-text description
+ * - Anything else: 'Seizure'
+ */
+function seizureTypeLabel(s) {
+  if (!s.type) return 'Seizure';
+  if (s.type === 'other') {
+    return s.typeOther && s.typeOther.trim() ? s.typeOther : 'Other';
+  }
+  if (typeof s.type === 'string' && s.type.startsWith('custom:')) {
+    const idx = parseInt(s.type.split(':')[1], 10);
+    const list = state.settings?.customSeizureTypes || [];
+    return list[idx] || 'Custom';
+  }
+  return s.type.charAt(0).toUpperCase() + s.type.slice(1);
 }
 
 async function handleHistoryItemClick(e) {
@@ -602,10 +741,10 @@ async function renderTrends() {
     </div>
   `;
 
-  // Charts
-  const ketoneSeries  = KCCharts.dailyAverages(measurements, 'bloodKetone', fromMs, toMs);
-  const glucoseSeries = KCCharts.dailyAverages(measurements, 'glucose', fromMs, toMs);
-  const gkiSeries     = KCCharts.dailyAverages(
+  // Charts — morning vs evening split (00:00–11:59 vs 12:00–23:59)
+  const ketoneSeries  = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
+  const glucoseSeries = KCCharts.morningEveningSeries(measurements, 'glucose', fromMs, toMs);
+  const gkiSeries     = KCCharts.morningEveningSeries(
     measurements,
     (r) => (r.bloodKetone && r.glucose ? r.glucose / r.bloodKetone : null),
     fromMs, toMs
@@ -614,11 +753,24 @@ async function renderTrends() {
 
   const settings = state.settings || await KCDB.getSettings();
 
-  KCCharts.lineChart('chartKetone', ketoneSeries.labels, ketoneSeries.data, KCCharts.COLORS.sageDeep,
-    (settings.ketoneMin && settings.ketoneMax) ? { min: settings.ketoneMin, max: settings.ketoneMax } : null);
-  KCCharts.lineChart('chartGlucose', glucoseSeries.labels, glucoseSeries.data, KCCharts.COLORS.honey, null);
-  KCCharts.lineChart('chartGKI', gkiSeries.labels, gkiSeries.data, KCCharts.COLORS.terra,
-    (settings.gkiMin != null && settings.gkiMax != null) ? { min: settings.gkiMin, max: settings.gkiMax } : null);
+  KCCharts.lineChartSplit(
+    'chartKetone',
+    ketoneSeries,
+    KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep,
+    (settings.ketoneMin && settings.ketoneMax) ? { min: settings.ketoneMin, max: settings.ketoneMax } : null
+  );
+  KCCharts.lineChartSplit(
+    'chartGlucose',
+    glucoseSeries,
+    KCCharts.COLORS.honey, KCCharts.COLORS.honeyDeep,
+    null
+  );
+  KCCharts.lineChartSplit(
+    'chartGKI',
+    gkiSeries,
+    KCCharts.COLORS.terra, KCCharts.COLORS.terraDeep,
+    (settings.gkiMin != null && settings.gkiMax != null) ? { min: settings.gkiMin, max: settings.gkiMax } : null
+  );
   KCCharts.barChart('chartSeizures', seizureSeries.labels, seizureSeries.data, KCCharts.COLORS.terraDeep);
 }
 
@@ -658,13 +810,41 @@ async function populateSettingsForm() {
   document.getElementById('settingDOB').value = s.dob || '';
   selectChipValue('settingVariant', s.variant);
   state.selectedSettingVariant = s.variant;
+  document.getElementById('settingCustomRatio').value = s.customRatio || '';
+  toggleCustomRatioField(s.variant === 'custom');
   selectChipValue('settingDefaultKetone', s.defaultKetone);
   state.selectedSettingDefaultKetone = s.defaultKetone;
   document.getElementById('settingKetoneMin').value = s.ketoneMin ?? '';
   document.getElementById('settingKetoneMax').value = s.ketoneMax ?? '';
   document.getElementById('settingGKIMin').value = s.gkiMin ?? '';
   document.getElementById('settingGKIMax').value = s.gkiMax ?? '';
+  document.getElementById('settingKetoneAlertHigh').value = s.ketoneAlertHigh ?? '';
+  document.getElementById('settingGlucoseAlertLow').value = s.glucoseAlertLow ?? '';
   renderReminderList(s.reminders || []);
+  renderCustomSeizureTypeList(s.customSeizureTypes || []);
+}
+
+function toggleCustomRatioField(show) {
+  document.getElementById('customRatioField').classList.toggle('hidden', !show);
+}
+
+function renderCustomSeizureTypeList(types) {
+  const list = document.getElementById('customSeizureTypeList');
+  list.innerHTML = '';
+  types.forEach((label, i) => {
+    const row = document.createElement('div');
+    row.className = 'custom-type-row';
+    row.innerHTML = `
+      <input type="text" value="${escapeHtml(label)}" data-idx="${i}" placeholder="e.g. Eye blink (focal)" />
+      <button type="button" class="custom-type-remove" data-remove-type="${i}" aria-label="Remove">×</button>
+    `;
+    list.appendChild(row);
+  });
+}
+
+function getCustomSeizureTypes() {
+  return [...document.querySelectorAll('#customSeizureTypeList input[type="text"]')]
+    .map(i => i.value.trim()).filter(Boolean);
 }
 
 function renderReminderList(reminders) {
@@ -693,11 +873,15 @@ async function handleSettingsSubmit(e) {
     childName: document.getElementById('settingChildName').value.trim(),
     dob: document.getElementById('settingDOB').value,
     variant: state.selectedSettingVariant,
+    customRatio: document.getElementById('settingCustomRatio').value.trim(),
     defaultKetone: state.selectedSettingDefaultKetone,
     ketoneMin: parseFloat(document.getElementById('settingKetoneMin').value) || null,
     ketoneMax: parseFloat(document.getElementById('settingKetoneMax').value) || null,
     gkiMin: parseFloat(document.getElementById('settingGKIMin').value) || null,
     gkiMax: parseFloat(document.getElementById('settingGKIMax').value) || null,
+    ketoneAlertHigh: parseFloat(document.getElementById('settingKetoneAlertHigh').value) || null,
+    glucoseAlertLow: parseFloat(document.getElementById('settingGlucoseAlertLow').value) || null,
+    customSeizureTypes: getCustomSeizureTypes(),
     reminders: getReminderTimes()
   };
   await KCDB.saveSettings(settings);
@@ -812,7 +996,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('manualEntryBtn').addEventListener('click', manualSeizureEntry);
 
   // Seizure form chips
-  setupChipGroup('seizureType', false, (v) => { state.selectedSeizureType = v; });
+  setupChipGroup('seizureType', false, (v) => {
+    state.selectedSeizureType = v;
+    toggleSeizureTypeOtherField(v === 'other');
+  });
   setupChipGroup('seizureTriggers', true, (v) => { state.selectedSeizureTriggers = v; });
 
   document.getElementById('seizureForm').addEventListener('submit', handleSeizureSubmit);
@@ -850,7 +1037,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Settings
-  setupChipGroup('settingVariant', false, (v) => { state.selectedSettingVariant = v; });
+  setupChipGroup('settingVariant', false, (v) => {
+    state.selectedSettingVariant = v;
+    toggleCustomRatioField(v === 'custom');
+  });
   setupChipGroup('settingDefaultKetone', false, (v) => { state.selectedSettingDefaultKetone = v; });
   document.getElementById('settingsForm').addEventListener('submit', handleSettingsSubmit);
   document.getElementById('addReminderBtn').addEventListener('click', () => {
@@ -864,6 +1054,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       const current = getReminderTimes();
       current.splice(idx, 1);
       renderReminderList(current);
+    }
+  });
+
+  // Custom seizure types — add / remove
+  document.getElementById('addCustomSeizureTypeBtn').addEventListener('click', () => {
+    const current = getCustomSeizureTypes();
+    current.push('');
+    renderCustomSeizureTypeList(current);
+    // Focus the new (empty) row
+    const inputs = document.querySelectorAll('#customSeizureTypeList input[type="text"]');
+    if (inputs.length) inputs[inputs.length - 1].focus();
+  });
+  document.getElementById('customSeizureTypeList').addEventListener('click', (e) => {
+    if (e.target.matches('[data-remove-type]')) {
+      const idx = parseInt(e.target.dataset.removeType, 10);
+      const current = getCustomSeizureTypes();
+      // Reading the live values (not just the previously-saved list) means
+      // an in-progress edit isn't lost if the user removes a different row.
+      current.splice(idx, 1);
+      renderCustomSeizureTypeList(current);
     }
   });
   document.getElementById('clearDataBtn').addEventListener('click', async () => {

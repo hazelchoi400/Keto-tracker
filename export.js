@@ -62,7 +62,7 @@ async function exportXLSX(fromMs, toMs) {
   XLSX.utils.book_append_sheet(wb, measSheet, 'Measurements');
 
   // ---------- Tab 4: Seizures ----------
-  const seizSheet = buildSeizuresSheet(seizures, measurements);
+  const seizSheet = buildSeizuresSheet(seizures, measurements, settings);
   XLSX.utils.book_append_sheet(wb, seizSheet, 'Seizures');
 
   // ---------- Tab 5: About ----------
@@ -97,9 +97,13 @@ function buildSummarySheet(settings, measurements, seizures, fromMs, toMs) {
   const seizureDays = new Set(seizures.map(s => isoDateMs(s.startTime)));
   const totalDur = seizures.reduce((a, s) => a + (s.durationSec || 0), 0);
 
-  // Most common seizure type
+  // Most common seizure type — tally by display label so custom/'other' show
+  // their human-readable names rather than raw keys like 'custom:0'.
   const typeCount = {};
-  for (const s of seizures) if (s.type) typeCount[s.type] = (typeCount[s.type] || 0) + 1;
+  for (const s of seizures) {
+    const label = formatSeizureType(s, settings);
+    if (label) typeCount[label] = (typeCount[label] || 0) + 1;
+  }
   const topType = Object.keys(typeCount).sort((a, b) => typeCount[b] - typeCount[a])[0] || '—';
 
   const totalDays = Math.max(1, Math.round((toMs - fromMs) / 86400000));
@@ -109,7 +113,7 @@ function buildSummarySheet(settings, measurements, seizures, fromMs, toMs) {
     ['', ''],
     ['Child', settings.childName || '—'],
     ['Date of birth', settings.dob || '—'],
-    ['Diet variant', formatVariant(settings.variant)],
+    ['Diet variant', formatVariant(settings.variant, settings)],
     ['Period', `${fmtDateUK(fromMs)} to ${fmtDateUK(toMs)}`],
     ['Days in period', totalDays],
     ['Generated', new Date().toLocaleString('en-GB')],
@@ -277,7 +281,7 @@ function buildMeasurementsSheet(measurements, settings) {
   return ws;
 }
 
-function buildSeizuresSheet(seizures, measurements) {
+function buildSeizuresSheet(seizures, measurements, settings) {
   const headers = [
     'Date', 'Time', 'Type', 'Duration', 'Triggers', 'Rescue medication', 'Recovery (min)',
     'Last ketone before', 'Hours before', 'First ketone after', 'Hours after', 'Notes'
@@ -296,7 +300,7 @@ function buildSeizuresSheet(seizures, measurements) {
     rows.push([
       fmtDateUK(s.startTime),
       fmtTime24(d),
-      capitalise(s.type || ''),
+      formatSeizureType(s, settings),
       dur,
       (s.triggers || []).map(t => t.replace('-', ' ')).join('; '),
       s.rescueMed || '',
@@ -364,7 +368,7 @@ function buildAboutSheet(settings, fromMs, toMs, nMeas, nSeiz) {
     [''],
     ['Export details'],
     ['  Child name      ' + (settings.childName || '—')],
-    ['  Diet variant    ' + formatVariant(settings.variant)],
+    ['  Diet variant    ' + formatVariant(settings.variant, settings)],
     ['  Period          ' + fmtDateUK(fromMs) + ' to ' + fmtDateUK(toMs)],
     ['  Records         ' + nMeas + ' measurements, ' + nSeiz + ' seizures'],
     ['  Generated       ' + new Date().toLocaleString('en-GB')]
@@ -489,7 +493,7 @@ async function exportPDF(fromMs, toMs) {
   doc.setFont('helvetica', 'bold');
   doc.text('Diet variant', MARGIN, y);
   doc.setFont('helvetica', 'normal');
-  doc.text(formatVariant(settings.variant), MARGIN + 30, y);
+  doc.text(formatVariant(settings.variant, settings), MARGIN + 30, y);
   y += 5;
 
   doc.setFont('helvetica', 'bold');
@@ -542,26 +546,27 @@ async function exportPDF(fromMs, toMs) {
   doc.setTextColor(45, 42, 38);
   y += 8;
 
-  // Charts — render fresh to off-screen canvases so this works regardless of which screen the user is on
-  const ketoneSeries  = KCCharts.dailyAverages(measurements, 'bloodKetone', fromMs, toMs);
-  const glucoseSeries = KCCharts.dailyAverages(measurements, 'glucose', fromMs, toMs);
-  const gkiSeries     = KCCharts.dailyAverages(
+  // Charts — render fresh to off-screen canvases so this works regardless of which screen the user is on.
+  // Same morning/evening split as the in-app Trends view.
+  const ketoneSeries  = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
+  const glucoseSeries = KCCharts.morningEveningSeries(measurements, 'glucose', fromMs, toMs);
+  const gkiSeries     = KCCharts.morningEveningSeries(
     measurements,
     (r) => (r.bloodKetone && r.glucose && r.bloodKetone > 0 ? r.glucose / r.bloodKetone : null),
     fromMs, toMs
   );
   const seizureSeries = KCCharts.dailyCounts(seizures, fromMs, toMs);
 
-  y = await renderOffscreenChartToPDF(doc, 'Ketone trend (mmol/L)', y, MARGIN, PAGE_W,
-    'line', ketoneSeries.labels, ketoneSeries.data, KCCharts.COLORS.sageDeep,
+  y = await renderOffscreenLineChartToPDF(doc, 'Ketone trend (mmol/L)', y, MARGIN, PAGE_W,
+    ketoneSeries, KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep,
     (settings.ketoneMin && settings.ketoneMax) ? { min: settings.ketoneMin, max: settings.ketoneMax } : null);
-  y = await renderOffscreenChartToPDF(doc, 'Glucose trend (mmol/L)', y, MARGIN, PAGE_W,
-    'line', glucoseSeries.labels, glucoseSeries.data, KCCharts.COLORS.honey, null);
-  y = await renderOffscreenChartToPDF(doc, 'GKI trend', y, MARGIN, PAGE_W,
-    'line', gkiSeries.labels, gkiSeries.data, KCCharts.COLORS.terra,
+  y = await renderOffscreenLineChartToPDF(doc, 'Glucose trend (mmol/L)', y, MARGIN, PAGE_W,
+    glucoseSeries, KCCharts.COLORS.honey, KCCharts.COLORS.honeyDeep, null);
+  y = await renderOffscreenLineChartToPDF(doc, 'GKI trend', y, MARGIN, PAGE_W,
+    gkiSeries, KCCharts.COLORS.terra, KCCharts.COLORS.terraDeep,
     (settings.gkiMin != null && settings.gkiMax != null) ? { min: settings.gkiMin, max: settings.gkiMax } : null);
-  y = await renderOffscreenChartToPDF(doc, 'Seizure frequency', y, MARGIN, PAGE_W,
-    'bar', seizureSeries.labels, seizureSeries.data, KCCharts.COLORS.terraDeep, null);
+  y = await renderOffscreenBarChartToPDF(doc, 'Seizure frequency', y, MARGIN, PAGE_W,
+    seizureSeries.labels, seizureSeries.data, KCCharts.COLORS.terraDeep);
 
   // Event log on a new page
   doc.addPage();
@@ -617,7 +622,7 @@ async function exportPDF(fromMs, toMs) {
       doc.text(fmtDateTime(s.startTime), MARGIN, y);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(45, 42, 38);
-      const parts = [`SEIZURE — ${s.type || 'unspecified'}`];
+      const parts = [`SEIZURE — ${formatSeizureType(s, settings) || 'unspecified'}`];
       if (s.durationSec)       parts.push(`${s.durationSec}s`);
       if (s.recoveryMin != null) parts.push(`recovery ${s.recoveryMin} min`);
       doc.text(parts.join(' · '), MARGIN + 32, y);
@@ -657,9 +662,15 @@ async function exportPDF(fromMs, toMs) {
   doc.save(filename);
 }
 
-async function renderOffscreenChartToPDF(doc, title, y, margin, pageW, chartType, labels, data, color, targetBand) {
+/**
+ * Off-screen morning/evening line chart for PDF embedding.
+ * `series` = { labels, morning[], evening[] } from KCCharts.morningEveningSeries.
+ * Y-axis auto-fits both data and target band so values above the band stay visible
+ * (fix for the v1.0 issue where >5 mmol/L readings were clipped).
+ */
+async function renderOffscreenLineChartToPDF(doc, title, y, margin, pageW, series, colorMorning, colorEvening, targetBand) {
   const imgW = pageW - margin * 2;
-  const imgH = 55;
+  const imgH = 60;
 
   if (y + imgH + 10 > 280) { doc.addPage(); y = margin; }
 
@@ -669,59 +680,97 @@ async function renderOffscreenChartToPDF(doc, title, y, margin, pageW, chartType
   doc.text(title, margin, y);
   y += 4;
 
-  // Off-screen canvas — high resolution for sharp PDF embedding
   const canvas = document.createElement('canvas');
   canvas.width = 1200;
-  canvas.height = 480;
-  // Must attach to DOM so Chart.js can size correctly, but keep it invisible
+  canvas.height = 520;
   canvas.style.position = 'fixed';
   canvas.style.left = '-9999px';
   canvas.style.top = '0';
   canvas.style.width = '1200px';
-  canvas.style.height = '480px';
+  canvas.style.height = '520px';
   document.body.appendChild(canvas);
 
   try {
-    const datasets = [{
-      data,
-      borderColor: color,
-      backgroundColor: color + '33',
-      borderWidth: chartType === 'line' ? 2.5 : 0,
-      tension: 0.35,
-      pointRadius: chartType === 'line' ? 3 : 0,
-      pointBackgroundColor: color,
-      spanGaps: true,
-      fill: chartType === 'line',
-      borderRadius: chartType === 'bar' ? 6 : 0,
-      maxBarThickness: 28
-    }];
+    const datasets = [
+      {
+        label: 'Morning',
+        data: series.morning,
+        borderColor: colorMorning,
+        backgroundColor: colorMorning + '22',
+        borderWidth: 2.5,
+        tension: 0.35,
+        pointRadius: 3,
+        pointBackgroundColor: colorMorning,
+        spanGaps: true,
+        fill: false,
+        order: 1
+      },
+      {
+        label: 'Evening',
+        data: series.evening,
+        borderColor: colorEvening,
+        backgroundColor: colorEvening + '22',
+        borderWidth: 2.5,
+        borderDash: [6, 5],
+        tension: 0.35,
+        pointRadius: 3,
+        pointBackgroundColor: colorEvening,
+        spanGaps: true,
+        fill: false,
+        order: 1
+      }
+    ];
 
-    if (chartType === 'line' && targetBand && targetBand.min != null && targetBand.max != null) {
+    if (targetBand && targetBand.min != null && targetBand.max != null) {
       datasets.push({
-        data: data.map(() => targetBand.max),
+        label: '_targetMax',
+        data: series.labels.map(() => targetBand.max),
         borderColor: 'transparent',
         backgroundColor: 'rgba(107, 138, 107, 0.18)',
         pointRadius: 0,
-        fill: { target: { value: targetBand.min }, above: 'rgba(107, 138, 107, 0.18)', below: 'transparent' }
+        fill: '+1',
+        tension: 0,
+        order: 99
+      });
+      datasets.push({
+        label: '_targetMin',
+        data: series.labels.map(() => targetBand.min),
+        borderColor: 'transparent',
+        backgroundColor: 'transparent',
+        pointRadius: 0,
+        fill: false,
+        tension: 0,
+        order: 99
       });
     }
 
+    const allVals = [...series.morning, ...series.evening];
+    const yMax = KCCharts.suggestedYMax(allVals, targetBand);
+
     const chart = new Chart(canvas, {
-      type: chartType,
-      data: { labels, datasets },
+      type: 'line',
+      data: { labels: series.labels, datasets },
       options: {
         responsive: false,
         animation: false,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: {
+            display: true,
+            position: 'bottom',
+            labels: {
+              boxWidth: 18, boxHeight: 14, padding: 16, font: { size: 16 },
+              filter: (item) => !item.text || !item.text.startsWith('_target')
+            }
+          }
+        },
         scales: {
           x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8, font: { size: 16 } } },
-          y: { beginAtZero: true, grid: { color: '#e3d8c5' }, ticks: { font: { size: 16 } } }
+          y: { beginAtZero: true, suggestedMax: yMax, grid: { color: '#e3d8c5' }, ticks: { font: { size: 16 } } }
         }
       }
     });
 
-    // Force a synchronous render by waiting one animation frame, then capture
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     const dataUrl = canvas.toDataURL('image/png', 1.0);
     doc.addImage(dataUrl, 'PNG', margin, y, imgW, imgH);
@@ -736,20 +785,109 @@ async function renderOffscreenChartToPDF(doc, title, y, margin, pageW, chartType
     if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
   }
 
-  y += imgH + 6;
-  return y;
+  return y + imgH + 6;
 }
 
-function formatVariant(v) {
+/**
+ * Off-screen bar chart for PDF embedding (used by seizure frequency).
+ */
+async function renderOffscreenBarChartToPDF(doc, title, y, margin, pageW, labels, data, color) {
+  const imgW = pageW - margin * 2;
+  const imgH = 55;
+
+  if (y + imgH + 10 > 280) { doc.addPage(); y = margin; }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(45, 42, 38);
+  doc.text(title, margin, y);
+  y += 4;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 480;
+  canvas.style.position = 'fixed';
+  canvas.style.left = '-9999px';
+  canvas.style.top = '0';
+  canvas.style.width = '1200px';
+  canvas.style.height = '480px';
+  document.body.appendChild(canvas);
+
+  try {
+    const chart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          data,
+          backgroundColor: color,
+          borderRadius: 6,
+          maxBarThickness: 28
+        }]
+      },
+      options: {
+        responsive: false,
+        animation: false,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8, font: { size: 16 } } },
+          y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0, font: { size: 16 } }, grid: { color: '#e3d8c5' } }
+        }
+      }
+    });
+
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const dataUrl = canvas.toDataURL('image/png', 1.0);
+    doc.addImage(dataUrl, 'PNG', margin, y, imgW, imgH);
+    chart.destroy();
+  } catch (err) {
+    console.warn('Chart render failed:', err);
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(9);
+    doc.setTextColor(138, 130, 120);
+    doc.text('(Chart not available)', margin, y + 5);
+  } finally {
+    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+  }
+
+  return y + imgH + 6;
+}
+
+function formatVariant(v, settings) {
   const map = {
     'classical-4-1': 'Classical 4:1',
     'classical-3-1': 'Classical 3:1',
     'classical-2-1': 'Classical 2:1',
     'mct': 'MCT',
+    'mkd': 'Modified Ketogenic Diet (MKD)',
     'mad': 'Modified Atkins (MAD)',
     'lgit': 'LGIT'
   };
+  if (v === 'custom') {
+    const r = settings && settings.customRatio ? settings.customRatio : '';
+    return r ? `Custom (${r})` : 'Custom';
+  }
   return map[v] || v || '—';
+}
+
+/**
+ * Format a seizure record's type for export. Handles:
+ *   - 'custom:N' values that reference settings.customSeizureTypes[N]
+ *   - 'other' values that may have a free-text typeOther description
+ *   - Standard values, capitalised
+ */
+function formatSeizureType(s, settings) {
+  if (!s || !s.type) return '';
+  if (s.type === 'other') {
+    return s.typeOther && s.typeOther.trim() ? s.typeOther : 'Other';
+  }
+  if (typeof s.type === 'string' && s.type.startsWith('custom:')) {
+    const idx = parseInt(s.type.split(':')[1], 10);
+    const list = (settings && settings.customSeizureTypes) || [];
+    return list[idx] || 'Custom';
+  }
+  return s.type.charAt(0).toUpperCase() + s.type.slice(1);
 }
 
 function urineLabel(v) {
@@ -762,5 +900,5 @@ function urineLabel(v) {
 }
 
 window.KCExport = {
-  exportXLSX, exportJSON, exportPDF, formatVariant, urineLabel
+  exportXLSX, exportJSON, exportPDF, formatVariant, formatSeizureType, urineLabel
 };

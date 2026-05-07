@@ -1142,6 +1142,85 @@ body::before {
 .btn-link:active { background: var(--sage-tint); }
 
 /* =====================================================
+   Alert banner (hyperketosis / hypoglycaemia warnings)
+   Used inline in measurement form + can wrap any value.
+   ===================================================== */
+
+.alert-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  background: var(--terracotta-tint);
+  color: var(--terracotta-deep);
+  border-radius: var(--radius-lg);
+  padding: 0.95rem 1.1rem;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.alert-banner svg {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+}
+
+.alert-banner-text { flex: 1; }
+
+.alert-banner-text strong {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 0.15rem;
+}
+
+/* Variant: highlight the alerting value on Home today-stat */
+.today-stat.alert .today-value { color: var(--terracotta-deep); }
+.today-stat.alert .today-unit  { color: var(--terracotta-deep); font-weight: 600; }
+
+/* =====================================================
+   Custom seizure type list (Settings)
+   ===================================================== */
+
+.custom-type-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.custom-type-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.85rem;
+}
+
+.custom-type-row input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  font-family: var(--font-body);
+  font-size: 1rem;
+  color: var(--ink);
+  padding: 0.3rem 0;
+  -webkit-appearance: none;
+}
+
+.custom-type-row input:focus { outline: none; }
+
+.custom-type-remove {
+  background: transparent;
+  border: none;
+  color: var(--terracotta-deep);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+}
+
+/* =====================================================
    Responsive — desktop adjustments
    ===================================================== */
 

@@ -6,7 +6,7 @@
 // Bump this version string whenever you ship an update. The browser uses
 // it to detect new versions. The convention is to keep this in sync with
 // the "Version" label shown on the About page in index.html.
-const CACHE_NAME = 'ketocare-v1.0';
+const CACHE_NAME = 'ketocare-v1.1';
 
 // Files to cache on install. Same-origin paths are relative; CDN URLs are absolute.
 const PRECACHE = [

@@ -54,11 +54,20 @@ const DEFAULT_SETTINGS = {
   childName: '',
   dob: '',
   variant: 'classical-4-1',
+  // Custom ratio label for variant === 'custom'. Free text e.g. "3.5:1".
+  customRatio: '',
   defaultKetone: 'blood',
   ketoneMin: 3,
   ketoneMax: 5,
   gkiMin: 1,
   gkiMax: 6,
+  // Alert thresholds — labelled "Set by your ketogenic diet centre"
+  // Trigger when blood ketone >= ketoneAlertHigh OR glucose < glucoseAlertLow
+  ketoneAlertHigh: 6,
+  glucoseAlertLow: 3,
+  // Parent-defined seizure types (additive to the standard pills)
+  // Stored as an array of short labels, e.g. ["Eye blink (focal)", "Head drop"]
+  customSeizureTypes: [],
   reminders: [], // ['07:00', '12:00']
   welcomeDismissed: false
 };

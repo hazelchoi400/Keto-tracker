@@ -199,6 +199,11 @@
         </div>
       </div>
 
+      <div class="field hidden" id="seizureTypeOtherField">
+        <label>Describe the seizure type</label>
+        <input type="text" id="seizureTypeOther" placeholder="e.g. Eye flutter with brief stare" autocomplete="off" />
+      </div>
+
       <div class="field">
         <label>Possible triggers <span class="muted">(select any)</span></label>
         <div class="chip-group multi" data-field="seizureTriggers">
@@ -286,6 +291,11 @@
         <span class="gki-label">GKI</span>
         <span class="gki-value" id="gkiValue">—</span>
         <span class="gki-hint" id="gkiHint">Enter blood ketone &amp; glucose to calculate</span>
+      </div>
+
+      <div class="alert-banner hidden" id="measureAlert" role="status" aria-live="polite">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+        <span class="alert-banner-text" id="measureAlertText"></span>
       </div>
 
       <div class="field">
@@ -512,10 +522,17 @@
           <button type="button" class="chip" data-value="classical-4-1">Classical 4:1</button>
           <button type="button" class="chip" data-value="classical-3-1">Classical 3:1</button>
           <button type="button" class="chip" data-value="classical-2-1">Classical 2:1</button>
+          <button type="button" class="chip" data-value="custom">Custom ratio</button>
           <button type="button" class="chip" data-value="mct">MCT</button>
+          <button type="button" class="chip" data-value="mkd">MKD</button>
           <button type="button" class="chip" data-value="mad">MAD</button>
           <button type="button" class="chip" data-value="lgit">LGIT</button>
         </div>
+      </div>
+
+      <div class="field hidden" id="customRatioField">
+        <label>Custom ratio</label>
+        <input type="text" id="settingCustomRatio" placeholder="e.g. 3.5:1" autocomplete="off" />
       </div>
 
       <div class="field">
@@ -526,7 +543,7 @@
         </div>
       </div>
 
-      <p class="section-heading">Target ranges <span class="muted">(set by dietitian)</span></p>
+      <p class="section-heading">Target ranges <span class="muted">(set by your ketogenic diet centre)</span></p>
 
       <div class="field-row">
         <div class="field">
@@ -549,6 +566,26 @@
           <input type="number" step="0.1" id="settingGKIMax" placeholder="6" />
         </div>
       </div>
+
+      <p class="section-heading">Alert thresholds <span class="muted">(set by your ketogenic diet centre)</span></p>
+      <p class="muted small">When a reading reaches one of these thresholds, the value is shown in terracotta with a reminder to follow your child's management plan.</p>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Blood ketone high (≥)</label>
+          <input type="number" step="0.1" id="settingKetoneAlertHigh" placeholder="6" />
+        </div>
+        <div class="field">
+          <label>Glucose low (&lt;)</label>
+          <input type="number" step="0.1" id="settingGlucoseAlertLow" placeholder="3" />
+        </div>
+      </div>
+
+      <p class="section-heading">Custom seizure types <span class="muted">(optional)</span></p>
+      <p class="muted small">If your neurologist has described your child's seizures with specific labels, add them here. They'll appear as extra options on the seizure log.</p>
+
+      <div class="custom-type-list" id="customSeizureTypeList"></div>
+      <button type="button" class="btn-ghost" id="addCustomSeizureTypeBtn">+ Add seizure type</button>
 
       <p class="section-heading">Reminders</p>
       <p class="muted small">Times to remind you to check ketones. Notifications work best when this app is added to your home screen.</p>
@@ -618,7 +655,7 @@
 
       <button type="button" class="btn-ghost" id="showWelcomeAgainBtn">Show welcome screen again</button>
 
-      <p class="about-version muted small">KetoCare · Version 1.0</p>
+      <p class="about-version muted small">KetoCare · Version 1.1</p>
     </div>
   </section>
 

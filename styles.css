@@ -456,6 +456,14 @@ body::before {
   gap: 0.75rem;
 }
 
+/* Export screen — slightly tighter rhythm so Restore from backup
+   is visible above the fold on small phones. The card sizes
+   (export-buttons) are unchanged. */
+.screen[data-screen="export"] .form { gap: 0.85rem; }
+.screen[data-screen="export"] .form > p.muted:first-child { margin-bottom: -0.15rem; }
+.screen[data-screen="export"] .form .section-heading { margin-top: 0.15rem; }
+.screen[data-screen="export"] .form .muted.small { margin: -0.2rem 0 0; }
+
 .field label {
   font-size: 0.85rem;
   font-weight: 600;

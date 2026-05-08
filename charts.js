@@ -446,6 +446,155 @@ function seizuresByHour(seizures) {
 }
 
 /* =====================================================
+   Weekly heatmap data
+
+   Builds an array of weeks. Each week is an array of 7 day cells.
+   The grid is week-aligned (Mon → Sun) so columns are days-of-week.
+   The first week's leading days and the last week's trailing days are
+   "out of range" cells so the grid stays rectangular.
+
+   Returns:
+     {
+       weeks: [
+         { weekStartMs, days: [{ ms, inRange, count }] x7 }, // length 7
+         ...
+       ],
+       maxCount,           // max single-day count, for opacity scaling
+       totalSeizures       // total seizures within range
+     }
+   ===================================================== */
+function weeklyHeatmap(seizures, fromMs, toMs) {
+  // Normalise range to whole local-day boundaries
+  const start = new Date(fromMs); start.setHours(0,0,0,0);
+  const end = new Date(toMs); end.setHours(23,59,59,999);
+
+  // Find Monday of the week containing `start`.
+  // getDay(): 0=Sun..6=Sat. We want Mon=0..Sun=6.
+  const dayMonIdx = (d) => (d.getDay() + 6) % 7;
+  const firstWeekMonday = new Date(start);
+  firstWeekMonday.setDate(start.getDate() - dayMonIdx(start));
+  firstWeekMonday.setHours(0,0,0,0);
+
+  // Bucket seizures by local-day timestamp
+  const dayCounts = {};
+  for (const s of seizures) {
+    const d = new Date(s.startTime); d.setHours(0,0,0,0);
+    const key = d.getTime();
+    dayCounts[key] = (dayCounts[key] || 0) + 1;
+  }
+
+  const weeks = [];
+  let maxCount = 0;
+  let totalSeizures = 0;
+  let cursor = new Date(firstWeekMonday);
+
+  while (cursor.getTime() <= end.getTime()) {
+    const weekStartMs = cursor.getTime();
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const dayDate = new Date(weekStartMs + i * 86400000);
+      const inRange = dayDate.getTime() >= start.getTime() && dayDate.getTime() <= end.getTime();
+      const count = inRange ? (dayCounts[dayDate.getTime()] || 0) : 0;
+      if (inRange) {
+        if (count > maxCount) maxCount = count;
+        totalSeizures += count;
+      }
+      days.push({ ms: dayDate.getTime(), inRange, count });
+    }
+    weeks.push({ weekStartMs, days });
+    cursor = new Date(cursor.getTime() + 7 * 86400000);
+  }
+
+  return { weeks, maxCount, totalSeizures };
+}
+
+/* =====================================================
+   Triggers frequency tally
+
+   Each seizure record may have a triggers[] array. Counts trigger
+   instances (not seizures), since a single seizure can list multiple.
+   Also reports how many seizures had no trigger logged.
+
+   Returns:
+     {
+       items: [{ label, count }, ...]   // sorted desc, includes "No trigger noted"
+       totalSeizures,
+       seizuresWithTrigger
+     }
+   ===================================================== */
+function triggerCounts(seizures) {
+  const tally = {};
+  let seizuresWithTrigger = 0;
+  for (const s of seizures) {
+    const triggers = (s.triggers || []).filter(Boolean);
+    if (triggers.length) {
+      seizuresWithTrigger++;
+      for (const t of triggers) {
+        const label = String(t).replace(/-/g, ' ');
+        tally[label] = (tally[label] || 0) + 1;
+      }
+    }
+  }
+  const noTriggerCount = seizures.length - seizuresWithTrigger;
+  // Capitalise first letter of each label for display
+  const items = Object.entries(tally)
+    .map(([label, count]) => ({
+      label: label.charAt(0).toUpperCase() + label.slice(1),
+      count
+    }))
+    .sort((a, b) => b.count - a.count);
+  // Always include "No trigger noted" at the end so denominator is clear
+  if (noTriggerCount > 0) {
+    items.push({ label: 'No trigger noted', count: noTriggerCount });
+  }
+  return {
+    items,
+    totalSeizures: seizures.length,
+    seizuresWithTrigger
+  };
+}
+
+/* =====================================================
+   Horizontal bar chart (used by triggers tally)
+   ===================================================== */
+function horizontalBarChart(canvasId, labels, data, color) {
+  applyChartDefaults();
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  _charts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Count',
+        data,
+        backgroundColor: color,
+        borderRadius: 4,
+        borderSkipped: false,
+        maxBarThickness: 22
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          beginAtZero: true,
+          ticks: { stepSize: 1, precision: 0 },
+          grid: { color: CHART_COLORS.line }
+        },
+        y: {
+          grid: { display: false }
+        }
+      }
+    }
+  });
+}
+
+/* =====================================================
    Combined-mode line chart (single series + optional band + optional
    seizure markers along the x-axis baseline)
 
@@ -573,9 +722,12 @@ window.KCCharts = {
   dailyCounts,
   seizureDayMarkers,
   seizuresByHour,
+  weeklyHeatmap,
+  triggerCounts,
   lineChartSplit,
   lineChartCombined,
   barChart,
+  horizontalBarChart,
   hourHistogramChart,
   computeStats,
   destroyChart,

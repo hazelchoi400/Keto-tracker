@@ -607,6 +607,19 @@ async function exportPDF(fromMs, toMs) {
   y = await renderOffscreenHourHistogramToPDF(doc, 'Seizures by hour of day', y, MARGIN, PAGE_W,
     hourSeries.data, KCCharts.COLORS.terraDeep);
 
+  // Day-of-week heatmap (only meaningful at >=14d range, which the PDF
+  // always satisfies because it covers the full export range).
+  y = renderHeatmapToPDF(doc, 'Day-of-week heatmap', y, MARGIN, PAGE_W,
+    KCCharts.weeklyHeatmap(seizures, fromMs, toMs));
+
+  // Triggers tally
+  const triggers = KCCharts.triggerCounts(seizures);
+  if (triggers.items.length) {
+    y = await renderOffscreenHorizontalBarChartToPDF(doc, 'Triggers logged', y, MARGIN, PAGE_W,
+      triggers.items.map(t => t.label), triggers.items.map(t => t.count),
+      KCCharts.COLORS.terraDeep);
+  }
+
   // Event log on a new page
   doc.addPage();
   y = MARGIN;
@@ -1051,6 +1064,173 @@ function renderPatternsStatsTable(doc, margin, y, pageW, measurements, seizures,
   y += 7;
 
   return y;
+}
+
+/**
+ * Render the day-of-week heatmap directly using jsPDF rectangles.
+ * Avoids the off-screen Chart.js path because there's no Chart.js
+ * heatmap type in this build, and html2canvas would add a heavy dep.
+ *
+ * `weekly` = output of KCCharts.weeklyHeatmap.
+ */
+function renderHeatmapToPDF(doc, title, y, margin, pageW, weekly) {
+  const dayHeads = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const orderedWeeks = [...weekly.weeks].reverse();
+  const labelW = 14; // mm — width of the row-label column
+  const usableW = pageW - margin * 2;
+  const cellW = (usableW - labelW) / 7;
+  const cellH = 5; // mm — short to keep the heatmap compact
+  const headH = 4; // header row height
+  const totalH = headH + orderedWeeks.length * cellH + 6;
+
+  // Page break if needed
+  if (y + totalH > 280) { doc.addPage(); y = margin; }
+
+  // Title
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(45, 42, 38);
+  doc.text(title, margin, y);
+  y += 4;
+
+  // Day-of-week headers (Mon..Sun centred above each column)
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(138, 130, 120);
+  for (let i = 0; i < 7; i++) {
+    const cx = margin + labelW + cellW * (i + 0.5);
+    doc.text(dayHeads[i], cx, y, { align: 'center' });
+  }
+  y += 2.5;
+
+  const max = weekly.maxCount || 1;
+
+  for (const w of orderedWeeks) {
+    // Row label: week-start date
+    doc.setFontSize(7);
+    doc.setTextColor(138, 130, 120);
+    const d = new Date(w.weekStartMs);
+    const lbl = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    doc.text(lbl, margin + labelW - 1, y + cellH * 0.7, { align: 'right' });
+
+    for (let i = 0; i < 7; i++) {
+      const cell = w.days[i];
+      const cx = margin + labelW + cellW * i + 0.4;
+      const cy = y + 0.4;
+      const cw = cellW - 0.8;
+      const ch = cellH - 0.8;
+      if (!cell.inRange) continue; // empty/transparent
+      if (cell.count === 0) {
+        // Light cream cell with line border to match in-app surface look
+        doc.setDrawColor(227, 216, 197);
+        doc.setFillColor(255, 250, 242);
+        doc.roundedRect(cx, cy, cw, ch, 0.7, 0.7, 'FD');
+      } else {
+        // Terracotta with opacity proportional to count.
+        // jsPDF doesn't do RGBA, so we mix toward the cream background manually.
+        // Background cream: (244, 237, 226). Terracotta-deep: (168, 90, 72).
+        const ratio = Math.min(1, 0.20 + (cell.count / max) * 0.75);
+        const bg = [244, 237, 226], fg = [168, 90, 72];
+        const r = Math.round(bg[0] + (fg[0] - bg[0]) * ratio);
+        const g = Math.round(bg[1] + (fg[1] - bg[1]) * ratio);
+        const b = Math.round(bg[2] + (fg[2] - bg[2]) * ratio);
+        doc.setFillColor(r, g, b);
+        doc.setDrawColor(r, g, b);
+        doc.roundedRect(cx, cy, cw, ch, 0.7, 0.7, 'FD');
+        // Count label — white text on darker cells, ink on lighter
+        doc.setFontSize(7);
+        if (ratio > 0.55) doc.setTextColor(255, 250, 242);
+        else doc.setTextColor(45, 42, 38);
+        doc.text(String(cell.count), cx + cw / 2, cy + ch * 0.72, { align: 'center' });
+      }
+    }
+    y += cellH;
+  }
+
+  // Footnote
+  y += 2;
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(8);
+  doc.setTextColor(138, 130, 120);
+  doc.text('Each cell shows the number of seizures logged on that day. Darker = more.', margin, y);
+
+  return y + 5;
+}
+
+/**
+ * Off-screen horizontal bar chart for PDF embedding (used by triggers tally).
+ */
+async function renderOffscreenHorizontalBarChartToPDF(doc, title, y, margin, pageW, labels, data, color) {
+  const imgW = pageW - margin * 2;
+  // Height scales with number of bars but capped
+  const imgH = Math.min(70, 18 + labels.length * 6);
+
+  if (y + imgH + 14 > 280) { doc.addPage(); y = margin; }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(45, 42, 38);
+  doc.text(title, margin, y);
+  y += 4;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  // Canvas height also scales with bar count, generous to keep labels legible
+  canvas.height = Math.min(700, 200 + labels.length * 40);
+  canvas.style.position = 'fixed';
+  canvas.style.left = '-9999px';
+  canvas.style.top = '0';
+  canvas.style.width = '1200px';
+  canvas.style.height = canvas.height + 'px';
+  document.body.appendChild(canvas);
+
+  try {
+    const chart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          data,
+          backgroundColor: color,
+          borderRadius: 4,
+          maxBarThickness: 30
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: false,
+        animation: false,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { beginAtZero: true, ticks: { stepSize: 1, precision: 0, font: { size: 16 } }, grid: { color: '#e3d8c5' } },
+          y: { grid: { display: false }, ticks: { font: { size: 16 } } }
+        }
+      }
+    });
+
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const dataUrl = canvas.toDataURL('image/png', 1.0);
+    doc.addImage(dataUrl, 'PNG', margin, y, imgW, imgH);
+    chart.destroy();
+  } catch (err) {
+    console.warn('Chart render failed:', err);
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(9);
+    doc.setTextColor(138, 130, 120);
+    doc.text('(Chart not available)', margin, y + 5);
+  } finally {
+    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+  }
+
+  // Footnote
+  y += imgH + 3;
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(8);
+  doc.setTextColor(138, 130, 120);
+  doc.text('Trigger instances logged across all seizures. Each seizure can have multiple triggers.', margin, y);
+
+  return y + 5;
 }
 
 /**

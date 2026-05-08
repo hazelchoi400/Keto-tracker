@@ -913,6 +913,79 @@ body::before {
 
 .patterns-grid .stat-card .stat-table .val.empty { color: var(--ink-mute); font-weight: 400; }
 
+/* =====================================================
+   Day-of-week heatmap (Patterns screen)
+
+   Layout: 8-column grid — 1 narrow row-label col + 7 day cols.
+   Each day cell is a small rounded square, opacity proportional to count.
+   ===================================================== */
+
+.heatmap {
+  display: grid;
+  grid-template-columns: 3.2rem repeat(7, 1fr);
+  gap: 4px;
+  margin-top: 0.25rem;
+}
+
+.heatmap .heatmap-corner,
+.heatmap .heatmap-day-head {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  font-weight: 600;
+  text-align: center;
+  padding-bottom: 2px;
+}
+
+.heatmap .heatmap-row-label {
+  font-size: 0.72rem;
+  color: var(--ink-mute);
+  align-self: center;
+  text-align: right;
+  padding-right: 0.4rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.heatmap .heatmap-cell {
+  aspect-ratio: 1 / 1;
+  min-height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.heatmap .heatmap-cell[data-count="0"] {
+  color: var(--ink-mute);
+  font-weight: 400;
+  opacity: 0.45;
+}
+
+/* Out-of-range cells (before the start date or after today). */
+.heatmap .heatmap-cell.empty {
+  background: transparent;
+  border-color: transparent;
+  opacity: 0;
+}
+
+/* When the heatmap can't render at the chosen range */
+.heatmap-empty-message {
+  padding: 1.6rem 0.5rem 0.4rem;
+  text-align: center;
+  font-size: 0.92rem;
+  color: var(--ink-mute);
+}
+
+/* Allow the triggers chart to be a touch taller than the line charts */
+.chart-canvas-wrap--tall { height: 260px; }
+
 .chart-card {
   background: var(--surface);
   border: 1px solid var(--line);

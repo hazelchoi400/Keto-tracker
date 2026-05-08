@@ -21,7 +21,7 @@ const state = {
   selectedTrendRange: 30,
   // 'split' (AM vs PM, default) or 'combined' fallback
   selectedTrendView: 'split',
-  selectedPatternsRange: 30,
+  selectedPatternsRange: 90,
   selectedSettingVariant: 'classical-4-1',
   selectedSettingDefaultKetone: 'blood'
 };
@@ -874,6 +874,88 @@ async function renderPatterns() {
   // Hour-of-day histogram
   const hourSeries = KCCharts.seizuresByHour(seizures);
   KCCharts.hourHistogramChart('patternsHourChart', hourSeries.data, KCCharts.COLORS.terraDeep);
+
+  // Day-of-week heatmap — rendered as HTML/CSS, not a Chart.js canvas
+  renderHeatmap(seizures, fromMs, toMs, days);
+
+  // Triggers frequency tally
+  renderTriggersChart(seizures);
+}
+
+/**
+ * Render the day-of-week heatmap into #patternsHeatmap.
+ * Auto-hides at 7d (not enough rows for the layout to mean anything) and
+ * shows a small message instead.
+ */
+function renderHeatmap(seizures, fromMs, toMs, days) {
+  const container = document.getElementById('patternsHeatmap');
+  const note = document.getElementById('patternsHeatmapNote');
+  if (!container) return;
+
+  // At 7d the heatmap is one row of 7 cells — not a heatmap. Hide.
+  if (days < 14) {
+    container.innerHTML = '<p class="heatmap-empty-message">Heatmap available at 30d or 90d range.</p>';
+    if (note) note.classList.add('hidden');
+    return;
+  }
+  if (note) note.classList.remove('hidden');
+
+  const { weeks, maxCount } = KCCharts.weeklyHeatmap(seizures, fromMs, toMs);
+  const dayHeads = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  // Most-recent week at the top — reverse week order
+  const orderedWeeks = [...weeks].reverse();
+
+  // Heatmap cell colour: terracotta-deep with opacity proportional to count.
+  // 0 keeps the surface treatment (light cream). max → solid terracotta.
+  // Min opacity for any non-zero count is bumped so a single seizure is still visible.
+  const cellStyle = (count) => {
+    if (!count) return '';
+    const ratio = maxCount > 0 ? count / maxCount : 0;
+    const alpha = 0.20 + ratio * 0.75; // 0.20 (faint) → 0.95 (solid)
+    return `background: rgba(168, 90, 72, ${alpha.toFixed(2)}); border-color: transparent; color: ${alpha > 0.55 ? '#fffaf2' : 'var(--ink)'};`;
+  };
+
+  const fmtRowLabel = (ms) => {
+    const d = new Date(ms);
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  };
+
+  const cells = [];
+  // Header row: empty corner + Mon..Sun
+  cells.push('<div class="heatmap-corner"></div>');
+  dayHeads.forEach(h => cells.push(`<div class="heatmap-day-head">${h}</div>`));
+
+  for (const w of orderedWeeks) {
+    cells.push(`<div class="heatmap-row-label">${fmtRowLabel(w.weekStartMs)}</div>`);
+    for (const d of w.days) {
+      if (!d.inRange) {
+        cells.push('<div class="heatmap-cell empty"></div>');
+      } else {
+        const style = cellStyle(d.count);
+        const label = d.count > 0 ? d.count : '';
+        cells.push(`<div class="heatmap-cell" data-count="${d.count}" style="${style}">${label}</div>`);
+      }
+    }
+  }
+  container.innerHTML = cells.join('');
+}
+
+/**
+ * Render the triggers frequency tally into #patternsTriggersChart.
+ * Honest about denominator: every seizure that had no trigger logged
+ * shows up as a separate "No trigger noted" bar.
+ */
+function renderTriggersChart(seizures) {
+  const tally = KCCharts.triggerCounts(seizures);
+  if (!tally.items.length) {
+    // Nothing to render — leave the canvas blank rather than trying to draw an empty chart
+    KCCharts.destroyChart('patternsTriggersChart');
+    return;
+  }
+  const labels = tally.items.map(i => i.label);
+  const data = tally.items.map(i => i.count);
+  KCCharts.horizontalBarChart('patternsTriggersChart', labels, data, KCCharts.COLORS.terraDeep);
 }
 
 /**

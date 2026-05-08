@@ -19,8 +19,9 @@ const state = {
   selectedUrineKetone: null,
   selectedHistoryFilter: 'all',
   selectedTrendRange: 30,
-  // 'combined' (single line per chart, default) or 'split' (AM vs PM)
-  selectedTrendView: 'combined',
+  // 'split' (AM vs PM, default) or 'combined' fallback
+  selectedTrendView: 'split',
+  selectedPatternsRange: 30,
   selectedSettingVariant: 'classical-4-1',
   selectedSettingDefaultKetone: 'blood'
 };
@@ -75,6 +76,7 @@ function navigateTo(screenName) {
   if (screenName === 'home')         renderHome();
   if (screenName === 'history')      renderHistory();
   if (screenName === 'trends')       renderTrends();
+  if (screenName === 'patterns')     renderPatterns();
   if (screenName === 'export')       initExportScreen();
   if (screenName === 'settings')     populateSettingsForm();
   if (screenName === 'seizure-timer') resetTimer();
@@ -702,7 +704,7 @@ async function renderTrends() {
     .filter(m => m.bloodKetone && m.glucose && m.bloodKetone > 0)
     .map(m => m.glucose / m.bloodKetone);
 
-  // Stat cards
+  // Stat cards — "readings" instead of "n", which is opaque to non-clinical parents
   const stats = {
     ketone:  KCCharts.computeStats(ketoneVals),
     glucose: KCCharts.computeStats(glucoseVals),
@@ -718,21 +720,21 @@ async function renderTrends() {
       <p class="stat-row"><span>min</span><span>${stats.ketone.min}</span></p>
       <p class="stat-row"><span>max</span><span>${stats.ketone.max}</span></p>
       <p class="stat-row"><span>mean</span><span>${stats.ketone.mean}</span></p>
-      <p class="stat-row"><span>n</span><span>${stats.ketone.count}</span></p>
+      <p class="stat-row"><span>readings</span><span>${stats.ketone.count}</span></p>
     </div>
     <div class="stat-card">
       <p class="stat-name">Glucose (mmol/L)</p>
       <p class="stat-row"><span>min</span><span>${stats.glucose.min}</span></p>
       <p class="stat-row"><span>max</span><span>${stats.glucose.max}</span></p>
       <p class="stat-row"><span>mean</span><span>${stats.glucose.mean}</span></p>
-      <p class="stat-row"><span>n</span><span>${stats.glucose.count}</span></p>
+      <p class="stat-row"><span>readings</span><span>${stats.glucose.count}</span></p>
     </div>
     <div class="stat-card">
       <p class="stat-name">GKI</p>
       <p class="stat-row"><span>min</span><span>${stats.gki.min}</span></p>
       <p class="stat-row"><span>max</span><span>${stats.gki.max}</span></p>
       <p class="stat-row"><span>mean</span><span>${stats.gki.mean}</span></p>
-      <p class="stat-row"><span>n</span><span>${stats.gki.count}</span></p>
+      <p class="stat-row"><span>readings</span><span>${stats.gki.count}</span></p>
     </div>
     <div class="stat-card">
       <p class="stat-name">Seizures</p>
@@ -750,14 +752,6 @@ async function renderTrends() {
   const gkiTarget = (settings.gkiMin != null && settings.gkiMax != null)
     ? { min: settings.gkiMin, max: settings.gkiMax } : null;
 
-  // Seizure-day markers (used as small dots along the bottom of the ketone chart)
-  const seizureMarkers = KCCharts.seizureDayMarkers(seizures, fromMs, toMs);
-
-  // Toggle a small note line beneath the ketone chart depending on whether
-  // there are any markers to explain
-  const noteEl = document.getElementById('ketoneSeizureMarkerNote');
-  if (noteEl) noteEl.classList.toggle('hidden', seizureMarkers.length === 0);
-
   if (state.selectedTrendView === 'split') {
     const ketoneSeries  = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
     const glucoseSeries = KCCharts.morningEveningSeries(measurements, 'glucose', fromMs, toMs);
@@ -769,8 +763,7 @@ async function renderTrends() {
     KCCharts.lineChartSplit(
       'chartKetone', ketoneSeries,
       KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep,
-      ketoneTarget,
-      { markers: seizureMarkers }
+      ketoneTarget
     );
     KCCharts.lineChartSplit(
       'chartGlucose', glucoseSeries,
@@ -793,7 +786,7 @@ async function renderTrends() {
     );
     KCCharts.lineChartCombined(
       'chartKetone', ketoneSeries, KCCharts.COLORS.sageDeep,
-      ketoneTarget, seizureMarkers, { label: 'Ketone' }
+      ketoneTarget, null, { label: 'Ketone' }
     );
     KCCharts.lineChartCombined(
       'chartGlucose', glucoseSeries, KCCharts.COLORS.honey,
@@ -807,10 +800,133 @@ async function renderTrends() {
 
   const seizureSeries = KCCharts.dailyCounts(seizures, fromMs, toMs);
   KCCharts.barChart('chartSeizures', seizureSeries.labels, seizureSeries.data, KCCharts.COLORS.terraDeep);
+}
 
-  // Hour-of-day histogram — descriptive only
+/* =====================================================
+   PATTERNS SCREEN
+
+   Exploratory views for parents/clinicians who want to spot patterns
+   in the data. Distinct from the basic Trends screen so the everyday
+   "is the number okay?" check stays calm and skimmable.
+   ===================================================== */
+
+async function renderPatterns() {
+  const days = state.selectedPatternsRange;
+  const toMs = Date.now();
+  const fromMs = toMs - days * 86400000;
+
+  const measurements = await KCDB.getMeasurementsBetween(fromMs, toMs);
+  const seizures     = await KCDB.getSeizuresBetween(fromMs, toMs);
+
+  // Split readings into AM (before noon) vs PM (noon and after) based on the
+  // same boundary used everywhere else. We then run the same stats on each half.
+  const MORNING_END = KCCharts.MORNING_END_HOUR;
+  const isMorning = (ts) => new Date(ts).getHours() < MORNING_END;
+
+  const amM = measurements.filter(m => isMorning(m.timestamp));
+  const pmM = measurements.filter(m => !isMorning(m.timestamp));
+
+  const valsForKey = (records, key) => records
+    .filter(m => m[key] != null && !isNaN(m[key])).map(m => m[key]);
+  const valsForGKI = (records) => records
+    .filter(m => m.bloodKetone && m.glucose && m.bloodKetone > 0)
+    .map(m => m.glucose / m.bloodKetone);
+
+  const stats = {
+    ketoneAM:  KCCharts.computeStats(valsForKey(amM, 'bloodKetone')),
+    ketonePM:  KCCharts.computeStats(valsForKey(pmM, 'bloodKetone')),
+    glucoseAM: KCCharts.computeStats(valsForKey(amM, 'glucose')),
+    glucosePM: KCCharts.computeStats(valsForKey(pmM, 'glucose')),
+    gkiAM:     KCCharts.computeStats(valsForGKI(amM)),
+    gkiPM:     KCCharts.computeStats(valsForGKI(pmM))
+  };
+
+  // Seizure timing split: count by AM vs PM
+  const amSeizures = seizures.filter(s => isMorning(s.startTime));
+  const pmSeizures = seizures.filter(s => !isMorning(s.startTime));
+
+  document.getElementById('patternsStatGrid').innerHTML = `
+    ${patternsStatCard('Ketone (mmol/L)', stats.ketoneAM, stats.ketonePM)}
+    ${patternsStatCard('Glucose (mmol/L)', stats.glucoseAM, stats.glucosePM)}
+    ${patternsStatCard('GKI', stats.gkiAM, stats.gkiPM)}
+    ${patternsSeizureCard(amSeizures.length, pmSeizures.length, days)}
+  `;
+
+  // Ketone chart — AM/PM split with seizure-day markers along the baseline
+  const settings = state.settings || await KCDB.getSettings();
+  const ketoneTarget = (settings.ketoneMin && settings.ketoneMax)
+    ? { min: settings.ketoneMin, max: settings.ketoneMax } : null;
+
+  const ketoneSeries = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
+  const seizureMarkers = KCCharts.seizureDayMarkers(seizures, fromMs, toMs);
+
+  // Hide note line if there are no markers to explain
+  const noteEl = document.getElementById('patternsKetoneNote');
+  if (noteEl) noteEl.classList.toggle('hidden', seizureMarkers.length === 0);
+
+  KCCharts.lineChartSplit(
+    'patternsKetoneChart', ketoneSeries,
+    KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep,
+    ketoneTarget,
+    { markers: seizureMarkers }
+  );
+
+  // Hour-of-day histogram
   const hourSeries = KCCharts.seizuresByHour(seizures);
-  KCCharts.hourHistogramChart('chartSeizuresByHour', hourSeries.data, KCCharts.COLORS.terraDeep);
+  KCCharts.hourHistogramChart('patternsHourChart', hourSeries.data, KCCharts.COLORS.terraDeep);
+}
+
+/**
+ * Build a Patterns stat card showing AM vs PM as two columns.
+ * Uses a 3-column grid (label, AM value, PM value) so the eye can compare.
+ */
+function patternsStatCard(name, am, pm) {
+  const cell = (s, key) => {
+    const v = s[key];
+    const empty = (v === '—' || v == null);
+    return `<span class="val${empty ? ' empty' : ''}">${v}</span>`;
+  };
+  return `
+    <div class="stat-card">
+      <p class="stat-name">${name}</p>
+      <div class="stat-table">
+        <span></span>
+        <span class="col-head">AM</span>
+        <span class="col-head">PM</span>
+        <span class="row-label">min</span>${cell(am,'min')}${cell(pm,'min')}
+        <span class="row-label">max</span>${cell(am,'max')}${cell(pm,'max')}
+        <span class="row-label">mean</span>${cell(am,'mean')}${cell(pm,'mean')}
+        <span class="row-label">readings</span>
+        <span class="val${am.count === 0 ? ' empty' : ''}">${am.count}</span>
+        <span class="val${pm.count === 0 ? ' empty' : ''}">${pm.count}</span>
+      </div>
+    </div>
+  `;
+}
+
+/** Seizure card variant for the Patterns grid: AM vs PM totals + per day */
+function patternsSeizureCard(amCount, pmCount, days) {
+  const total = amCount + pmCount;
+  const amPerDay = (amCount / days).toFixed(2);
+  const pmPerDay = (pmCount / days).toFixed(2);
+  return `
+    <div class="stat-card">
+      <p class="stat-name">Seizures</p>
+      <div class="stat-table">
+        <span></span>
+        <span class="col-head">AM</span>
+        <span class="col-head">PM</span>
+        <span class="row-label">total</span>
+        <span class="val${amCount === 0 ? ' empty' : ''}">${amCount}</span>
+        <span class="val${pmCount === 0 ? ' empty' : ''}">${pmCount}</span>
+        <span class="row-label">per day</span>
+        <span class="val${amCount === 0 ? ' empty' : ''}">${amPerDay}</span>
+        <span class="val${pmCount === 0 ? ' empty' : ''}">${pmPerDay}</span>
+        <span class="row-label">overall</span>
+        <span class="val" style="grid-column: span 2; text-align: right;">${total}</span>
+      </div>
+    </div>
+  `;
 }
 
 /* =====================================================
@@ -1074,10 +1190,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     state.selectedTrendRange = parseInt(v, 10);
     renderTrends();
   });
-  // Trends view: combined (single line) or split (AM vs PM)
+  // Trends view: split (AM vs PM, default) or combined fallback
   setupChipGroup('trendView', false, (v) => {
     state.selectedTrendView = v;
     renderTrends();
+  });
+  // Patterns range
+  setupChipGroup('patternsRange', false, (v) => {
+    state.selectedPatternsRange = parseInt(v, 10);
+    renderPatterns();
   });
 
   // Settings

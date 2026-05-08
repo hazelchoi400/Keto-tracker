@@ -862,6 +862,57 @@ body::before {
 .stat-card .stat-row span:first-child { color: var(--ink-mute); }
 .stat-card .stat-row span:last-child { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 
+/* =====================================================
+   Patterns screen — soft entry link from Trends
+   ===================================================== */
+
+.patterns-link {
+  margin: 0.4rem 0 1rem;
+  width: 100%;
+  text-align: center;
+  font-size: 0.95rem;
+  color: var(--sage-deep);
+}
+
+.patterns-intro {
+  margin: 0 0 1.1rem;
+  line-height: 1.5;
+}
+
+/* Patterns stat cards: AM | PM split inside each card.
+   Renders as: a small header row (min/max/mean/readings) and two columns. */
+.patterns-grid .stat-card .stat-table {
+  display: grid;
+  grid-template-columns: minmax(0, auto) 1fr 1fr;
+  column-gap: 0.6rem;
+  row-gap: 0.18rem;
+  align-items: baseline;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.patterns-grid .stat-card .stat-table .col-head {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  font-weight: 600;
+  text-align: right;
+  padding-bottom: 0.15rem;
+}
+
+.patterns-grid .stat-card .stat-table .row-label {
+  color: var(--ink-mute);
+}
+
+.patterns-grid .stat-card .stat-table .val {
+  text-align: right;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.patterns-grid .stat-card .stat-table .val.empty { color: var(--ink-mute); font-weight: 400; }
+
 .chart-card {
   background: var(--surface);
   border: 1px solid var(--line);

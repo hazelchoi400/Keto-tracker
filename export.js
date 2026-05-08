@@ -563,7 +563,7 @@ async function exportPDF(fromMs, toMs) {
   y = await renderOffscreenCombinedLineChartToPDF(doc, 'Ketone trend (mmol/L)', y, MARGIN, PAGE_W,
     ketoneSeries, KCCharts.COLORS.sageDeep,
     (settings.ketoneMin && settings.ketoneMax) ? { min: settings.ketoneMin, max: settings.ketoneMax } : null,
-    seizureMarkers);
+    null);
   y = await renderOffscreenCombinedLineChartToPDF(doc, 'Glucose trend (mmol/L)', y, MARGIN, PAGE_W,
     glucoseSeries, KCCharts.COLORS.honey, null, null);
   y = await renderOffscreenCombinedLineChartToPDF(doc, 'GKI trend', y, MARGIN, PAGE_W,
@@ -572,6 +572,38 @@ async function exportPDF(fromMs, toMs) {
     null);
   y = await renderOffscreenBarChartToPDF(doc, 'Seizure frequency', y, MARGIN, PAGE_W,
     seizureSeries.labels, seizureSeries.data, KCCharts.COLORS.terraDeep);
+
+  // ===== Patterns section — own page so dietitians can find/skip easily =====
+  doc.addPage();
+  y = MARGIN;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(45, 42, 38);
+  doc.text('Patterns', MARGIN, y);
+  y += 6;
+
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(9);
+  doc.setTextColor(138, 130, 120);
+  const introLines = doc.splitTextToSize(
+    'Exploratory views for spotting individual patterns in the data — descriptive only, not for clinical decisions.',
+    PAGE_W - MARGIN * 2
+  );
+  doc.text(introLines, MARGIN, y);
+  y += introLines.length * 4 + 4;
+
+  // AM/PM split stats table
+  doc.setTextColor(45, 42, 38);
+  y = renderPatternsStatsTable(doc, MARGIN, y, PAGE_W, measurements, seizures, fromMs, toMs);
+
+  // AM/PM ketone chart with seizure markers
+  const ketoneSplit = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
+  y = await renderOffscreenSplitLineChartToPDF(doc, 'Ketone trend — AM vs PM (mmol/L)', y, MARGIN, PAGE_W,
+    ketoneSplit, KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep,
+    (settings.ketoneMin && settings.ketoneMax) ? { min: settings.ketoneMin, max: settings.ketoneMax } : null,
+    seizureMarkers);
+
+  // Hour-of-day histogram
   y = await renderOffscreenHourHistogramToPDF(doc, 'Seizures by hour of day', y, MARGIN, PAGE_W,
     hourSeries.data, KCCharts.COLORS.terraDeep);
 
@@ -784,6 +816,241 @@ async function renderOffscreenCombinedLineChartToPDF(doc, title, y, margin, page
   }
 
   return y + imgH + 6;
+}
+
+/**
+ * Off-screen AM/PM split line chart for PDF embedding.
+ * Used by the Patterns section.
+ */
+async function renderOffscreenSplitLineChartToPDF(doc, title, y, margin, pageW, series, colorMorning, colorEvening, targetBand, markers) {
+  const imgW = pageW - margin * 2;
+  const imgH = 60;
+
+  if (y + imgH + 10 > 280) { doc.addPage(); y = margin; }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(45, 42, 38);
+  doc.text(title, margin, y);
+  y += 4;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 520;
+  canvas.style.position = 'fixed';
+  canvas.style.left = '-9999px';
+  canvas.style.top = '0';
+  canvas.style.width = '1200px';
+  canvas.style.height = '520px';
+  document.body.appendChild(canvas);
+
+  try {
+    const datasets = [
+      {
+        label: 'Morning',
+        data: series.morning,
+        borderColor: colorMorning,
+        backgroundColor: colorMorning + '22',
+        borderWidth: 2.5,
+        tension: 0.35,
+        pointRadius: 3,
+        pointBackgroundColor: colorMorning,
+        spanGaps: true,
+        fill: false,
+        order: 1
+      },
+      {
+        label: 'Evening',
+        data: series.evening,
+        borderColor: colorEvening,
+        backgroundColor: colorEvening + '22',
+        borderWidth: 2.5,
+        borderDash: [6, 5],
+        tension: 0.35,
+        pointRadius: 3,
+        pointBackgroundColor: colorEvening,
+        spanGaps: true,
+        fill: false,
+        order: 1
+      }
+    ];
+
+    if (targetBand && targetBand.min != null && targetBand.max != null) {
+      datasets.push({
+        label: '_targetMax',
+        data: series.labels.map(() => targetBand.max),
+        borderColor: 'transparent',
+        backgroundColor: 'rgba(107, 138, 107, 0.18)',
+        pointRadius: 0,
+        fill: '+1',
+        tension: 0,
+        order: 99
+      });
+      datasets.push({
+        label: '_targetMin',
+        data: series.labels.map(() => targetBand.min),
+        borderColor: 'transparent',
+        backgroundColor: 'transparent',
+        pointRadius: 0,
+        fill: false,
+        tension: 0,
+        order: 99
+      });
+    }
+
+    if (markers && markers.length) {
+      const points = markers.map(m => ({ x: series.labels[m.index], y: 0 }));
+      datasets.push({
+        label: '_seizureMarkers',
+        data: points,
+        type: 'scatter',
+        borderColor: 'transparent',
+        backgroundColor: '#a85a48',
+        pointStyle: 'circle',
+        pointRadius: 5,
+        showLine: false,
+        order: 0
+      });
+    }
+
+    const allVals = [...series.morning, ...series.evening];
+    const yMax = KCCharts.suggestedYMax(allVals, targetBand);
+
+    const chart = new Chart(canvas, {
+      type: 'line',
+      data: { labels: series.labels, datasets },
+      options: {
+        responsive: false,
+        animation: false,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            position: 'bottom',
+            labels: {
+              boxWidth: 18, boxHeight: 14, padding: 16, font: { size: 16 },
+              filter: (item) => !item.text || !item.text.startsWith('_')
+            }
+          }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8, font: { size: 16 } } },
+          y: { beginAtZero: true, suggestedMax: yMax, grid: { color: '#e3d8c5' }, ticks: { font: { size: 16 } } }
+        }
+      }
+    });
+
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const dataUrl = canvas.toDataURL('image/png', 1.0);
+    doc.addImage(dataUrl, 'PNG', margin, y, imgW, imgH);
+    chart.destroy();
+  } catch (err) {
+    console.warn('Chart render failed:', err);
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(9);
+    doc.setTextColor(138, 130, 120);
+    doc.text('(Chart not available)', margin, y + 5);
+  } finally {
+    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+  }
+
+  return y + imgH + 6;
+}
+
+/**
+ * Render the AM/PM stats table that appears at the top of the Patterns
+ * section. Uses jsPDF's text primitives — small enough that we don't need
+ * to off-screen render a HTML table.
+ */
+function renderPatternsStatsTable(doc, margin, y, pageW, measurements, seizures, fromMs, toMs) {
+  const MORNING_END = KCCharts.MORNING_END_HOUR;
+  const isMorning = (ts) => new Date(ts).getHours() < MORNING_END;
+
+  const amM = measurements.filter(m => isMorning(m.timestamp));
+  const pmM = measurements.filter(m => !isMorning(m.timestamp));
+
+  const valsForKey = (records, key) => records
+    .filter(m => m[key] != null && !isNaN(m[key])).map(m => m[key]);
+  const valsForGKI = (records) => records
+    .filter(m => m.bloodKetone && m.glucose && m.bloodKetone > 0)
+    .map(m => m.glucose / m.bloodKetone);
+
+  const stats = {
+    ketoneAM:  KCCharts.computeStats(valsForKey(amM, 'bloodKetone')),
+    ketonePM:  KCCharts.computeStats(valsForKey(pmM, 'bloodKetone')),
+    glucoseAM: KCCharts.computeStats(valsForKey(amM, 'glucose')),
+    glucosePM: KCCharts.computeStats(valsForKey(pmM, 'glucose')),
+    gkiAM:     KCCharts.computeStats(valsForGKI(amM)),
+    gkiPM:     KCCharts.computeStats(valsForGKI(pmM))
+  };
+
+  const amSeiz = seizures.filter(s => isMorning(s.startTime)).length;
+  const pmSeiz = seizures.filter(s => !isMorning(s.startTime)).length;
+
+  // Layout: 5 columns — metric, AM min/max/mean/n, PM min/max/mean/n
+  // Compact textual presentation. Stays simple to keep PDF rendering fast.
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(45, 42, 38);
+
+  const colX = [
+    margin,                  // metric label
+    margin + 50,             // AM min
+    margin + 65,             // AM max
+    margin + 80,             // AM mean
+    margin + 95,             // AM readings
+    margin + 115,            // PM min
+    margin + 130,            // PM max
+    margin + 145,            // PM mean
+    margin + 160             // PM readings
+  ];
+
+  // Header row 1 — AM / PM groupings
+  doc.setFontSize(8);
+  doc.setTextColor(138, 130, 120);
+  doc.text('AM', colX[1] + 22, y, { align: 'center' });
+  doc.text('PM', colX[5] + 22, y, { align: 'center' });
+  y += 3;
+
+  // Header row 2 — column titles
+  const subHeads = ['min', 'max', 'mean', 'n', 'min', 'max', 'mean', 'n'];
+  subHeads.forEach((h, i) => {
+    doc.text(h, colX[i + 1], y, { align: 'left' });
+  });
+  y += 4;
+
+  // Light separator line
+  doc.setDrawColor(227, 216, 197);
+  doc.setLineWidth(0.2);
+  doc.line(margin, y - 1, margin + (pageW - margin * 2), y - 1);
+  y += 2;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(45, 42, 38);
+
+  const writeRow = (label, am, pm) => {
+    doc.setFont('helvetica', 'bold');
+    doc.text(label, colX[0], y);
+    doc.setFont('helvetica', 'normal');
+    [am.min, am.max, am.mean, am.count, pm.min, pm.max, pm.mean, pm.count]
+      .forEach((v, i) => doc.text(String(v), colX[i + 1], y));
+    y += 5;
+  };
+
+  writeRow('Ketone',  stats.ketoneAM,  stats.ketonePM);
+  writeRow('Glucose', stats.glucoseAM, stats.glucosePM);
+  writeRow('GKI',     stats.gkiAM,     stats.gkiPM);
+
+  // Seizures row — different shape (just total + per day)
+  doc.setFont('helvetica', 'bold');
+  doc.text('Seizures', colX[0], y);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`total ${amSeiz}`, colX[1], y);
+  doc.text(`total ${pmSeiz}`, colX[5], y);
+  y += 7;
+
+  return y;
 }
 
 /**

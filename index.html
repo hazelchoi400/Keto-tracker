@@ -374,8 +374,8 @@
 
     <div class="filter-row">
       <div class="chip-group" data-field="trendView">
-        <button type="button" class="chip selected" data-value="combined">Combined</button>
-        <button type="button" class="chip" data-value="split">AM vs PM</button>
+        <button type="button" class="chip selected" data-value="split">AM vs PM</button>
+        <button type="button" class="chip" data-value="combined">Combined</button>
       </div>
     </div>
 
@@ -384,7 +384,6 @@
     <div class="chart-card">
       <h3>Ketone <span class="muted">mmol/L</span></h3>
       <div class="chart-canvas-wrap"><canvas id="chartKetone"></canvas></div>
-      <p class="chart-note muted small" id="ketoneSeizureMarkerNote">Terracotta dots along the bottom mark the days a seizure was logged.</p>
     </div>
 
     <div class="chart-card">
@@ -402,10 +401,64 @@
       <div class="chart-canvas-wrap"><canvas id="chartSeizures"></canvas></div>
     </div>
 
+    <button class="btn-link patterns-link" data-go="patterns" type="button">
+      Look for patterns →
+    </button>
+
+    <nav class="bottom-nav">
+      <button data-go="home" class="navbtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
+        <span>Home</span>
+      </button>
+      <button data-go="history" class="navbtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        <span>History</span>
+      </button>
+      <button data-go="trends" class="navbtn active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
+        <span>Trends</span>
+      </button>
+      <button data-go="export" class="navbtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v12"/></svg>
+        <span>Export</span>
+      </button>
+    </nav>
+  </section>
+
+  <!-- ========================================================== -->
+  <!-- PATTERNS                                                    -->
+  <!-- ========================================================== -->
+  <section class="screen" data-screen="patterns">
+    <header class="screen-header">
+      <button class="icon-btn back-btn" data-go="trends" aria-label="Back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <h2>Patterns</h2>
+      <span></span>
+    </header>
+
+    <p class="muted small patterns-intro">These views are for spotting individual patterns in your child's data — not for making clinical decisions. If something looks notable, share it with your dietitian or neurologist.</p>
+
+    <div class="filter-row">
+      <div class="chip-group" data-field="patternsRange">
+        <button type="button" class="chip" data-value="7">7d</button>
+        <button type="button" class="chip selected" data-value="30">30d</button>
+        <button type="button" class="chip" data-value="90">90d</button>
+      </div>
+    </div>
+
+    <div class="stat-grid patterns-grid" id="patternsStatGrid"></div>
+
+    <div class="chart-card">
+      <h3>Ketone <span class="muted">mmol/L</span></h3>
+      <div class="chart-canvas-wrap"><canvas id="patternsKetoneChart"></canvas></div>
+      <p class="chart-note muted small" id="patternsKetoneNote">Terracotta dots along the bottom mark days a seizure was logged.</p>
+    </div>
+
     <div class="chart-card">
       <h3>Seizures by hour of day</h3>
-      <div class="chart-canvas-wrap"><canvas id="chartSeizuresByHour"></canvas></div>
-      <p class="chart-note muted small">Descriptive only. Showing when seizures occurred over the selected period — there is no established time-of-day pattern in research.</p>
+      <div class="chart-canvas-wrap"><canvas id="patternsHourChart"></canvas></div>
+      <p class="chart-note muted small">Showing when seizures occurred over the selected period. Descriptive only — there is no established time-of-day pattern in the research.</p>
     </div>
 
     <nav class="bottom-nav">
@@ -669,7 +722,7 @@
 
       <button type="button" class="btn-ghost" id="showWelcomeAgainBtn">Show welcome screen again</button>
 
-      <p class="about-version muted small">KetoCare · Version 1.1</p>
+      <p class="about-version muted small">KetoCare · Version 1.2</p>
     </div>
   </section>
 

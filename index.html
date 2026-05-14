@@ -439,12 +439,23 @@
 
     <p class="muted small patterns-intro">These views are for spotting individual patterns in your child's data — not for making clinical decisions. If something looks notable, share it with your dietitian or neurologist.</p>
 
-    <div class="filter-row">
+    <div class="filter-row patterns-filter-row">
       <div class="chip-group" data-field="patternsRange">
         <button type="button" class="chip" data-value="7">7d</button>
         <button type="button" class="chip" data-value="30">30d</button>
         <button type="button" class="chip selected" data-value="90">90d</button>
+        <button type="button" class="chip" data-value="custom" id="patternsCustomChip">Custom…</button>
       </div>
+    </div>
+
+    <div class="patterns-custom-range hidden" id="patternsCustomRange">
+      <div class="custom-range-fields">
+        <label>From <input type="date" id="patternsCustomFrom"></label>
+        <label>To <input type="date" id="patternsCustomTo"></label>
+        <button type="button" class="btn-secondary custom-range-apply" id="patternsCustomApply">Apply</button>
+        <button type="button" class="btn-link" id="patternsCustomCancel">Cancel</button>
+      </div>
+      <p class="custom-range-error muted small hidden" id="patternsCustomError"></p>
     </div>
 
     <div class="stat-grid patterns-grid" id="patternsStatGrid"></div>

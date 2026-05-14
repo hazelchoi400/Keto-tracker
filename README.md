@@ -64,15 +64,23 @@ Accessed via "Look for patterns →" link at the bottom of Trends. Defaults to 9
 - AM/PM stat cards — min/max/mean/readings split into AM and PM columns
 - **Seizures by type count panel (v1.3)** — full-width list of every seizure type recorded in the period with totals
 - AM/PM ketone chart with seizure-day markers along the baseline
-- **Seizure types over time (v1.3)** — small multiples of frequency and median duration per type. Weekly buckets at 30d, monthly at 90d. Below 3 events per bucket, individual events show as dots rather than a misleading "median of two".
+- **Seizure types over time (v1.3)** — small multiples of frequency and median duration per type. Auto-bucketing by range length: weekly (≤21d), monthly (22–120d), quarterly (>120d). Below 3 events per bucket, individual events show as dots rather than a misleading "median of two".
 - Seizures-by-hour-of-day histogram
 - Day-of-week heatmap (Mon–Sun grid, terracotta gradient)
 - Triggers tally — horizontal bar chart of trigger instances logged
+- **Custom date range (v1.3)** — alongside 7d/30d/90d chips, a "Custom…" chip opens a date-pair picker for any window up to 1 year
 - All views are **descriptive only, not for clinical decisions**
 
 ### Exports
 - **PDF Summary report** — header, stats, basic charts, full Patterns section (AM/PM table, seizures-by-type count list, AM/PM ketone chart with seizure markers, **seizure-types-over-time frequency + duration small multiples (v1.3)**, hour histogram, day-of-week heatmap, triggers tally), event log
-- **XLSX Detailed records** — single Excel file with five tabs: Summary, Daily, Measurements, Seizures, About. Designed for clinic use; opens in Excel/Numbers, with conditional flags for in-target readings and each seizure linked to the nearest ketone reading on either side
+- **XLSX Detailed records** — single Excel file with seven tabs:
+  - **ReadMe** — first-sheet introduction explaining each tab and how they link
+  - Summary — high-level period overview
+  - Daily — one row per day, AM/PM ketone, mean glucose, seizures, in-target flag
+  - Measurements — every reading, long-format. **ISO date column (v1.3)** for joining across tabs
+  - Seizures — every event, with nearest blood ketone before/after. **ISO date column (v1.3)**
+  - **Daily detail (v1.3)** — long-format interleave of measurements and seizures, one row each, with a `record_type` column. Useful for pivot tables and exploratory analysis
+  - **Patterns data (v1.3)** — all in-app Patterns views as plain cells (AM/PM stats, type counts, per-type weekly/monthly counts and median durations, hour-of-day histogram, day-of-week histogram, triggers tally). No images. Highlight any column and Insert → Chart in Excel for a graph
 - **JSON Backup/Restore** — full app state. Restore via the "Restore from backup" section on the Export screen.
 
 ### Other

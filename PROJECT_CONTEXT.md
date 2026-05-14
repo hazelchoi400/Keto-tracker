@@ -152,8 +152,20 @@ Many neurologists describe a child's seizures with patient-specific labels ("foc
 
 ### Three exports, three purposes
 - **PDF Summary report** — printable. Header → stats table → basic charts (Combined mode) → **Patterns section on its own page** (AM/PM stats table + Seizures-by-type count list + AM/PM ketone chart with seizure markers + **seizure types over time, frequency + duration small multiples** + hour histogram + day-of-week heatmap + triggers tally) → event log. For clinic visits.
-- **XLSX Detailed records** — five tabs (Summary, Daily, Measurements, Seizures, About). For closer review or sending to dietitian. Designed for clinicians, not researchers — terminology is "data" not "research" because that has ethical/regulatory implications.
+- **XLSX Detailed records** — single Excel file with seven tabs (v1.3): **ReadMe**, Summary, Daily, Measurements, Seizures, **Daily detail**, **Patterns data**. The Measurements and Seizures tabs each carry an ISO `Date` column in addition to the UK-formatted `Date (UK)` column, so cross-tab joins on date work cleanly. Daily detail is a long-format interleave of measurements and seizures with a `record_type` column — for pivot tables and exploratory analysis. Patterns data mirrors the in-app Patterns screen as plain cells with no images. Designed for clinicians, not researchers — terminology is "data" not "research" because that has ethical/regulatory implications.
 - **JSON Backup** — full app state. For device migration or just safekeeping.
+
+### Patterns custom date range (v1.3)
+The Patterns chip group has a fourth "Custom…" option that expands an inline date-pair picker. Capped at 1 year. When active the chip relabels itself "Custom (5 Mar – 12 May)" so the loaded range is visible without re-opening the picker. State lives in `state.customPatternsRange = { fromMs, toMs }` — when both are set, the range overrides `selectedPatternsRange`.
+
+Bucketing for the seizure-types-over-time view (and the Patterns data XLSX tab) auto-picks from range length:
+- ≤21 days → weekly (7-day windows)
+- 22–120 days → monthly (30-day windows)
+- &gt;120 days → quarterly (90-day windows)
+
+These are 30/90-day windows ending today, not calendar months/quarters — chosen to avoid the awkwardness of February-length variance and to keep the rightmost bucket always being "this period so far". Title shows the active bucketing (e.g. "Seizure types over time — monthly") so the reader knows what each bar represents.
+
+Custom range is deliberately Patterns-only, not Trends. Trends is the calm-and-skimmable screen; adding a custom picker there muddies the school-run mental model. Patterns is the "you want to look harder" screen and the picker fits.
 
 ### CSV / "research" framing was rejected
 Earlier iteration had a CSV-zip export with one-hot encoded triggers, unix timestamps, etc. Pulled back: "research" implies HRA approval and ethics review. The single XLSX with clinician-friendly columns is the right primary format for current use.

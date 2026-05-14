@@ -22,6 +22,9 @@ const state = {
   // 'split' (AM vs PM, default) or 'combined' fallback
   selectedTrendView: 'split',
   selectedPatternsRange: 90,
+  // v1.3 — custom date range on Patterns. When fromMs/toMs are set the
+  // chip group shows "Custom (X–Y)" and selectedPatternsRange is ignored.
+  customPatternsRange: { fromMs: null, toMs: null },
   selectedSettingVariant: 'classical-4-1',
   selectedSettingDefaultKetone: 'blood'
 };
@@ -799,10 +802,119 @@ async function renderTrends() {
    "is the number okay?" check stays calm and skimmable.
    ===================================================== */
 
+/* ---------- v1.3: Custom date range picker ---------- */
+
+// Cap the upper end of the custom range. 1 year keeps the small-multiples
+// grid readable (4 quarterly buckets) and the data-builders fast.
+const PATTERNS_CUSTOM_MAX_DAYS = 366;
+
+function openPatternsCustomRangePicker() {
+  const wrap = document.getElementById('patternsCustomRange');
+  const fromEl = document.getElementById('patternsCustomFrom');
+  const toEl = document.getElementById('patternsCustomTo');
+  const errEl = document.getElementById('patternsCustomError');
+  if (!wrap || !fromEl || !toEl) return;
+
+  // Prefill: if a custom range is already active, show those dates;
+  // otherwise use the current preset range as a starting point so the
+  // user only needs to nudge the endpoints.
+  const today = new Date();
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const cur = state.customPatternsRange;
+  if (cur && cur.fromMs != null && cur.toMs != null) {
+    fromEl.value = fmt(new Date(cur.fromMs));
+    toEl.value = fmt(new Date(cur.toMs));
+  } else {
+    const days = state.selectedPatternsRange || 90;
+    fromEl.value = fmt(new Date(today.getTime() - days * 86400000));
+    toEl.value = fmt(today);
+  }
+  errEl.classList.add('hidden');
+  errEl.textContent = '';
+  wrap.classList.remove('hidden');
+}
+
+function closePatternsCustomRangePicker() {
+  document.getElementById('patternsCustomRange').classList.add('hidden');
+  // Restore the preset chip's selected state so the user isn't stuck
+  // with "Custom..." highlighted after cancelling
+  document.querySelectorAll('.chip-group[data-field="patternsRange"] .chip').forEach(c => {
+    c.classList.toggle('selected', c.dataset.value === String(state.selectedPatternsRange));
+  });
+  resetPatternsCustomChipLabel();
+}
+
+function applyPatternsCustomRange() {
+  const fromEl = document.getElementById('patternsCustomFrom');
+  const toEl = document.getElementById('patternsCustomTo');
+  const errEl = document.getElementById('patternsCustomError');
+
+  const showErr = (msg) => {
+    errEl.textContent = msg;
+    errEl.classList.remove('hidden');
+  };
+
+  if (!fromEl.value || !toEl.value) return showErr('Pick both a start and end date.');
+
+  // Local-midnight start; end-of-day for the To boundary so a range that
+  // includes "today" actually includes everything logged today.
+  const fromMs = new Date(fromEl.value + 'T00:00:00').getTime();
+  const toMs = new Date(toEl.value + 'T23:59:59.999').getTime();
+
+  if (isNaN(fromMs) || isNaN(toMs)) return showErr('Please enter valid dates.');
+  if (fromMs > toMs) return showErr('Start date must be on or before end date.');
+
+  const days = Math.ceil((toMs - fromMs) / 86400000);
+  if (days > PATTERNS_CUSTOM_MAX_DAYS) {
+    return showErr(`Range too long — please pick up to ${PATTERNS_CUSTOM_MAX_DAYS} days.`);
+  }
+  if (toMs > Date.now() + 86400000) {
+    return showErr('End date can\'t be in the future.');
+  }
+
+  state.customPatternsRange = { fromMs, toMs };
+  document.getElementById('patternsCustomRange').classList.add('hidden');
+  updatePatternsCustomChipLabel();
+  renderPatterns();
+}
+
+// Update the "Custom..." chip's visible label to "Custom (5 Mar – 12 May)"
+// so the user can see what range is loaded without re-opening the picker.
+function updatePatternsCustomChipLabel() {
+  const chip = document.getElementById('patternsCustomChip');
+  if (!chip) return;
+  const r = state.customPatternsRange;
+  if (!r || r.fromMs == null || r.toMs == null) {
+    resetPatternsCustomChipLabel();
+    return;
+  }
+  const fmt = (ms) => new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  chip.textContent = `Custom (${fmt(r.fromMs)} – ${fmt(r.toMs)})`;
+  // Mark selected manually since the chip group's data-value is "custom"
+  document.querySelectorAll('.chip-group[data-field="patternsRange"] .chip').forEach(c => {
+    c.classList.toggle('selected', c.dataset.value === 'custom');
+  });
+}
+
+function resetPatternsCustomChipLabel() {
+  const chip = document.getElementById('patternsCustomChip');
+  if (chip) chip.textContent = 'Custom…';
+}
+
 async function renderPatterns() {
-  const days = state.selectedPatternsRange;
-  const toMs = Date.now();
-  const fromMs = toMs - days * 86400000;
+  // v1.3 — range can come from either the preset chips (7/30/90) or a
+  // user-picked custom date pair. Custom wins when both ends are set.
+  const custom = state.customPatternsRange;
+  let fromMs, toMs, days;
+  if (custom && custom.fromMs != null && custom.toMs != null) {
+    fromMs = custom.fromMs;
+    toMs = custom.toMs;
+    days = Math.max(1, Math.ceil((toMs - fromMs) / 86400000));
+  } else {
+    days = state.selectedPatternsRange;
+    toMs = Date.now();
+    fromMs = toMs - days * 86400000;
+  }
 
   const measurements = await KCDB.getMeasurementsBetween(fromMs, toMs);
   const seizures     = await KCDB.getSeizuresBetween(fromMs, toMs);
@@ -1047,13 +1159,21 @@ function renderSeizureTypesOverTime(seizures, settings, fromMs, toMs, days) {
   // at longer ranges.
   if (days < 14) {
     titleEl.textContent = 'Seizure types over time';
-    freqGrid.innerHTML = '<p class="types-grid-empty">Available at 30d or 90d range.</p>';
+    freqGrid.innerHTML = '<p class="types-grid-empty">Available at 14+ days range.</p>';
     durGrid.innerHTML = '';
     return;
   }
 
-  const bucket = days <= 30 ? 'week' : 'month';
-  const bucketLabel = days <= 30 ? 'last 4 weeks' : 'last 3 months';
+  // v1.3 — auto-pick bucket from range length. Same rule used by the
+  // Patterns data tab in the XLSX export:
+  //   ≤21d    → weekly
+  //   22–120d → monthly
+  //   >120d   → quarterly (90-day windows)
+  // Title shows the active bucketing so the reader knows what each bar means.
+  let bucket, bucketLabel;
+  if (days <= 21)       { bucket = 'week';    bucketLabel = 'weekly'; }
+  else if (days <= 120) { bucket = 'month';   bucketLabel = 'monthly'; }
+  else                  { bucket = 'quarter'; bucketLabel = 'quarterly'; }
   titleEl.textContent = `Seizure types over time — ${bucketLabel}`;
 
   const freqData = KCCharts.seizureTypeFrequencyByType(seizures, settings, fromMs, toMs, bucket);
@@ -1375,9 +1495,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   // Patterns range
   setupChipGroup('patternsRange', false, (v) => {
+    if (v === 'custom') {
+      openPatternsCustomRangePicker();
+      return;
+    }
+    // Preset chip clicked — clear any custom range and re-render
+    state.customPatternsRange = { fromMs: null, toMs: null };
     state.selectedPatternsRange = parseInt(v, 10);
+    document.getElementById('patternsCustomRange').classList.add('hidden');
+    resetPatternsCustomChipLabel();
     renderPatterns();
   });
+
+  // v1.3 — Custom range picker buttons
+  const applyBtn = document.getElementById('patternsCustomApply');
+  if (applyBtn) applyBtn.addEventListener('click', applyPatternsCustomRange);
+  const cancelBtn = document.getElementById('patternsCustomCancel');
+  if (cancelBtn) cancelBtn.addEventListener('click', closePatternsCustomRangePicker);
 
   // Settings
   setupChipGroup('settingVariant', false, (v) => {

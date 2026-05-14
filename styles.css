@@ -1095,6 +1095,54 @@ body::before {
 .patterns-grid .stat-card--types .types-list .count { font-weight: 600; color: var(--ink); text-align: right; }
 .patterns-grid .stat-card--types .types-list .label.muted { color: var(--ink-mute); }
 
+/* v1.3 — Custom date range picker on Patterns. Renders as an inline
+   expansion under the chip row, matching the Export screen's date-range UI. */
+.patterns-custom-range {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.7rem 0.85rem;
+  margin: 0.1rem 0 0.9rem;
+}
+.custom-range-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 0.8rem;
+}
+.custom-range-fields label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.78rem;
+  color: var(--ink-mute);
+  gap: 0.15rem;
+}
+.custom-range-fields input[type="date"] {
+  font-size: 0.95rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: inherit;
+  min-width: 9.5rem;
+}
+.custom-range-fields .custom-range-apply {
+  margin-left: 0.2rem;
+  padding: 0.45rem 1rem;
+  font-size: 0.9rem;
+}
+.custom-range-error {
+  margin-top: 0.5rem;
+  color: var(--terra-deep);
+}
+
+/* When custom range is active, the chip text is longer than usual —
+   let it wrap to a second line cleanly without breaking the row. */
+.patterns-filter-row .chip-group {
+  flex-wrap: wrap;
+}
+
 /* =====================================================
    Reminders
    ===================================================== */

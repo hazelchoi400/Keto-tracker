@@ -761,26 +761,25 @@ function _typeGroupLabel(groupKey, sampleSeizure, settings) {
 }
 
 // Build bucket boundaries anchored on toMs and walking backwards.
-// bucket = 'week' → 7-day windows; bucket = 'month' → 30-day windows.
+// bucket = 'week' → 7-day windows; 'month' → 30-day; 'quarter' → 90-day.
 // The rightmost bucket ends at toMs (may be partial — "this week so far").
 // The leftmost partial bucket (if any) is DROPPED so every visible bar
 // represents the same span. The honest signal is in the chart note:
 // "Rightmost bar may be a partial period."
 // Returns [{ start, end, label }] in chronological (left-to-right) order.
 function _buildBuckets(fromMs, toMs, bucket) {
-  const spanMs = bucket === 'month' ? 30 * 86400000 : 7 * 86400000;
+  let spanMs;
+  if (bucket === 'quarter') spanMs = 90 * 86400000;
+  else if (bucket === 'month') spanMs = 30 * 86400000;
+  else spanMs = 7 * 86400000;
   const out = [];
   let end = toMs;
-  // Walk back while we still have room for a full-span bucket OR while we're
-  // on the rightmost bucket (which is allowed to be partial against `toMs`).
   while (end > fromMs) {
     const start = end - spanMs + 1;
-    if (start < fromMs) break;       // would be a partial leftmost — drop
+    if (start < fromMs) break;
     out.unshift({ start, end });
     end = start - 1;
   }
-  // If we wound up with zero buckets (range shorter than one span), force a
-  // single full-span bucket anchored on toMs so the chart still renders.
   if (!out.length) {
     out.push({ start: Math.max(toMs - spanMs + 1, fromMs), end: toMs });
   }

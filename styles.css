@@ -1020,6 +1020,82 @@ body::before {
 }
 
 /* =====================================================
+   v1.3 — Seizure types over time (small multiples in Patterns)
+   ===================================================== */
+
+.types-section { margin-bottom: 0.9rem; }
+.types-section:last-of-type { margin-bottom: 0.25rem; }
+
+.types-subhead {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 0.92rem;
+  margin: 0.4rem 0 0.55rem;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+}
+.types-subhead .muted { font-weight: 400; }
+
+.types-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.6rem;
+}
+
+.types-grid-cell {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.55rem 0.65rem 0.45rem;
+}
+
+.types-grid-cell h5 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 0.82rem;
+  margin: 0 0 0.15rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.types-grid-cell .types-grid-cell-sub {
+  font-size: 0.72rem;
+  color: var(--ink-mute);
+  margin: 0 0 0.35rem;
+}
+
+.types-grid-cell .mini-canvas-wrap {
+  position: relative;
+  height: 90px;
+}
+
+.types-grid-empty {
+  font-size: 0.85rem;
+  color: var(--ink-mute);
+  padding: 0.6rem 0.2rem;
+}
+
+/* The seizures-by-type count card spans both columns of the stat-grid
+   so the list reads as a single panel rather than two cramped halves. */
+.patterns-grid .stat-card.stat-card--types {
+  grid-column: 1 / -1;
+}
+
+.patterns-grid .stat-card--types .types-list {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 0.18rem;
+  column-gap: 1rem;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.patterns-grid .stat-card--types .types-list .label { color: var(--ink); }
+.patterns-grid .stat-card--types .types-list .count { font-weight: 600; color: var(--ink); text-align: right; }
+.patterns-grid .stat-card--types .types-list .label.muted { color: var(--ink-mute); }
+
+/* =====================================================
    Reminders
    ===================================================== */
 

@@ -2,7 +2,7 @@
 
 A paediatric ketogenic diet tracker for parents of children with epilepsy. Logs ketones, glucose, GKI, and seizures with timing detail. Generates clinic-ready PDF summaries for dietitian review.
 
-Current version: **v1.2**.
+Current version: **v1.3**.
 
 ## Deploy to GitHub Pages
 
@@ -62,14 +62,16 @@ External dependencies (loaded via CDN, then cached locally by the service worker
 ### Patterns (advanced)
 Accessed via "Look for patterns →" link at the bottom of Trends. Defaults to 90d.
 - AM/PM stat cards — min/max/mean/readings split into AM and PM columns
+- **Seizures by type count panel (v1.3)** — full-width list of every seizure type recorded in the period with totals
 - AM/PM ketone chart with seizure-day markers along the baseline
+- **Seizure types over time (v1.3)** — small multiples of frequency and median duration per type. Weekly buckets at 30d, monthly at 90d. Below 3 events per bucket, individual events show as dots rather than a misleading "median of two".
 - Seizures-by-hour-of-day histogram
 - Day-of-week heatmap (Mon–Sun grid, terracotta gradient)
 - Triggers tally — horizontal bar chart of trigger instances logged
 - All views are **descriptive only, not for clinical decisions**
 
 ### Exports
-- **PDF Summary report** — header, stats, basic charts, full Patterns section (AM/PM table, AM/PM ketone chart with seizure markers, hour histogram, day-of-week heatmap, triggers tally), event log
+- **PDF Summary report** — header, stats, basic charts, full Patterns section (AM/PM table, seizures-by-type count list, AM/PM ketone chart with seizure markers, **seizure-types-over-time frequency + duration small multiples (v1.3)**, hour histogram, day-of-week heatmap, triggers tally), event log
 - **XLSX Detailed records** — single Excel file with five tabs: Summary, Daily, Measurements, Seizures, About. Designed for clinic use; opens in Excel/Numbers, with conditional flags for in-target readings and each seizure linked to the nearest ketone reading on either side
 - **JSON Backup/Restore** — full app state. Restore via the "Restore from backup" section on the Export screen.
 
@@ -86,4 +88,4 @@ Accessed via "Look for patterns →" link at the bottom of Trends. Defaults to 9
 - Photo attachments for ketone strips, food, etc.
 - Direct secure sharing to dietitian (vs email/AirDrop the export)
 - Bluetooth ketone meter integration
-- Ketone-vs-seizure scatter / strip plot (apophenia risk at small sample sizes — reconsider when individual children have enough data per range to be informative)
+- Ketone-band binning of seizure rate (apophenia + denominator + matching + sample-size problems — see PROJECT_CONTEXT for full reasoning. May revisit in XLSX form, not in-app)

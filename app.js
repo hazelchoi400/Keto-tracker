@@ -613,22 +613,11 @@ function renderHistoryItem(ev) {
 
 /**
  * Resolve a human-readable label for a seizure record's type.
- * - Standard types: capitalised value (e.g. 'tonic-clonic' → 'Tonic-clonic')
- * - Custom types stored as 'custom:N': look up state.settings.customSeizureTypes[N]
- * - 'other' with a typeOther string: use the free-text description
- * - Anything else: 'Seizure'
+ * Thin wrapper over KCCharts.resolveSeizureTypeLabel so the resolver
+ * has no dependency on app.js's `state`.
  */
 function seizureTypeLabel(s) {
-  if (!s.type) return 'Seizure';
-  if (s.type === 'other') {
-    return s.typeOther && s.typeOther.trim() ? s.typeOther : 'Other';
-  }
-  if (typeof s.type === 'string' && s.type.startsWith('custom:')) {
-    const idx = parseInt(s.type.split(':')[1], 10);
-    const list = state.settings?.customSeizureTypes || [];
-    return list[idx] || 'Custom';
-  }
-  return s.type.charAt(0).toUpperCase() + s.type.slice(1);
+  return KCCharts.resolveSeizureTypeLabel(s, state.settings);
 }
 
 async function handleHistoryItemClick(e) {
@@ -845,15 +834,17 @@ async function renderPatterns() {
   const amSeizures = seizures.filter(s => isMorning(s.startTime));
   const pmSeizures = seizures.filter(s => !isMorning(s.startTime));
 
+  const settings = state.settings || await KCDB.getSettings();
+
   document.getElementById('patternsStatGrid').innerHTML = `
     ${patternsStatCard('Ketone (mmol/L)', stats.ketoneAM, stats.ketonePM)}
     ${patternsStatCard('Glucose (mmol/L)', stats.glucoseAM, stats.glucosePM)}
     ${patternsStatCard('GKI', stats.gkiAM, stats.gkiPM)}
     ${patternsSeizureCard(amSeizures.length, pmSeizures.length, days)}
+    ${patternsSeizureTypeCountCard(seizures, settings, days)}
   `;
 
   // Ketone chart — AM/PM split with seizure-day markers along the baseline
-  const settings = state.settings || await KCDB.getSettings();
   const ketoneTarget = (settings.ketoneMin && settings.ketoneMax)
     ? { min: settings.ketoneMin, max: settings.ketoneMax } : null;
 
@@ -870,6 +861,9 @@ async function renderPatterns() {
     ketoneTarget,
     { markers: seizureMarkers }
   );
+
+  // v1.3 — Seizure types over time (small-multiples frequency + duration)
+  renderSeizureTypesOverTime(seizures, settings, fromMs, toMs, days);
 
   // Hour-of-day histogram
   const hourSeries = KCCharts.seizuresByHour(seizures);
@@ -1010,6 +1004,108 @@ function patternsSeizureCard(amCount, pmCount, days) {
     </div>
   `;
 }
+
+/**
+ * v1.3 — Seizures-by-type count card. Full-width fifth panel in the Patterns
+ * stat grid. Shows one row per type with the total over the range. Hidden
+ * entirely (returns '') if there are no seizures in the range.
+ */
+function patternsSeizureTypeCountCard(seizures, settings, days) {
+  if (!seizures.length) return '';
+  const counts = KCCharts.seizureTypeCounts(seizures, settings);
+  if (!counts.length) return '';
+  const total = counts.reduce((a, c) => a + c.count, 0);
+  const rows = counts.map(c =>
+    `<span class="label">${escapeHtml(c.label)}</span><span class="count">${c.count}</span>`
+  ).join('');
+  return `
+    <div class="stat-card stat-card--types">
+      <p class="stat-name">Seizures by type</p>
+      <div class="types-list">
+        ${rows}
+        <span class="label muted">Total events</span>
+        <span class="count">${total}</span>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * v1.3 — Render the small-multiples seizure-types-over-time card.
+ * Stacked frequency and duration grids; one mini-chart per type.
+ * Hidden card at <14d range (not enough buckets to be meaningful).
+ */
+function renderSeizureTypesOverTime(seizures, settings, fromMs, toMs, days) {
+  const card = document.getElementById('patternsTypesCard');
+  const titleEl = document.getElementById('patternsTypesTitle');
+  const freqGrid = document.getElementById('patternsTypesFrequencyGrid');
+  const durGrid = document.getElementById('patternsTypesDurationGrid');
+  if (!card || !freqGrid || !durGrid) return;
+
+  // Below 14 days we don't have enough buckets for a trend view. Hide the
+  // whole card and show a small notice so the parent knows it's available
+  // at longer ranges.
+  if (days < 14) {
+    titleEl.textContent = 'Seizure types over time';
+    freqGrid.innerHTML = '<p class="types-grid-empty">Available at 30d or 90d range.</p>';
+    durGrid.innerHTML = '';
+    return;
+  }
+
+  const bucket = days <= 30 ? 'week' : 'month';
+  const bucketLabel = days <= 30 ? 'last 4 weeks' : 'last 3 months';
+  titleEl.textContent = `Seizure types over time — ${bucketLabel}`;
+
+  const freqData = KCCharts.seizureTypeFrequencyByType(seizures, settings, fromMs, toMs, bucket);
+
+  if (!freqData.length) {
+    freqGrid.innerHTML = '<p class="types-grid-empty">No seizures logged in this period.</p>';
+    durGrid.innerHTML = '';
+    return;
+  }
+
+  // Frequency grid — one cell per type.
+  freqGrid.innerHTML = freqData.map((t, i) => `
+    <div class="types-grid-cell">
+      <h5 title="${escapeHtml(t.label)}">${escapeHtml(t.label)}</h5>
+      <p class="types-grid-cell-sub">${t.total} event${t.total === 1 ? '' : 's'} total</p>
+      <div class="mini-canvas-wrap"><canvas id="patternsTypesFreq_${i}"></canvas></div>
+    </div>
+  `).join('');
+
+  // Duration grid — only types that have at least one timed event in range.
+  const durData = KCCharts.seizureTypeDurationByType(seizures, settings, fromMs, toMs, bucket);
+
+  if (!durData.length) {
+    durGrid.innerHTML = '<p class="types-grid-empty">No timed seizures logged in this period.</p>';
+  } else {
+    durGrid.innerHTML = durData.map((t, i) => `
+      <div class="types-grid-cell">
+        <h5 title="${escapeHtml(t.label)}">${escapeHtml(t.label)}</h5>
+        <p class="types-grid-cell-sub">${t.totalWithDuration} timed event${t.totalWithDuration === 1 ? '' : 's'}</p>
+        <div class="mini-canvas-wrap"><canvas id="patternsTypesDur_${i}"></canvas></div>
+      </div>
+    `).join('');
+  }
+
+  // Render charts after DOM is in place — short defer so Chart.js sees the
+  // canvases at their final layout size.
+  requestAnimationFrame(() => {
+    freqData.forEach((t, i) => {
+      KCCharts.seizureTypeSmallMultipleChart(
+        `patternsTypesFreq_${i}`, t.buckets, KCCharts.COLORS.terraDeep, 'frequency'
+      );
+    });
+    durData.forEach((t, i) => {
+      KCCharts.seizureTypeSmallMultipleChart(
+        `patternsTypesDur_${i}`, t.buckets, KCCharts.COLORS.terraDeep, 'duration'
+      );
+    });
+  });
+}
+
+// Tiny HTML escape used by the new type labels (handles custom labels that
+// might contain user-typed angle brackets etc.). See escapeHtml() above.
 
 /* =====================================================
    EXPORT SCREEN

@@ -596,12 +596,33 @@ async function exportPDF(fromMs, toMs) {
   doc.setTextColor(45, 42, 38);
   y = renderPatternsStatsTable(doc, MARGIN, y, PAGE_W, measurements, seizures, fromMs, toMs);
 
+  // v1.3 — Seizures by type list (compact panel under AM/PM stats)
+  y = renderPatternsTypeCountList(doc, MARGIN, y, PAGE_W, seizures, settings);
+
   // AM/PM ketone chart with seizure markers
   const ketoneSplit = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
   y = await renderOffscreenSplitLineChartToPDF(doc, 'Ketone trend — AM vs PM (mmol/L)', y, MARGIN, PAGE_W,
     ketoneSplit, KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep,
     (settings.ketoneMin && settings.ketoneMax) ? { min: settings.ketoneMin, max: settings.ketoneMax } : null,
     seizureMarkers);
+
+  // v1.3 — Seizure types over time (small-multiples frequency + duration)
+  // Range here covers the full export window. We pick weekly buckets when the
+  // window is <=30 days, monthly otherwise — matches the in-app behaviour.
+  const rangeDays = Math.ceil((toMs - fromMs) / 86400000);
+  if (rangeDays >= 14) {
+    const bucket = rangeDays <= 30 ? 'week' : 'month';
+    const freqData = KCCharts.seizureTypeFrequencyByType(seizures, settings, fromMs, toMs, bucket);
+    if (freqData.length) {
+      y = await renderSeizureTypesGridToPDF(doc, 'Seizure types — frequency over time', y, MARGIN, PAGE_W,
+        freqData, 'frequency');
+    }
+    const durData = KCCharts.seizureTypeDurationByType(seizures, settings, fromMs, toMs, bucket);
+    if (durData.length) {
+      y = await renderSeizureTypesGridToPDF(doc, 'Seizure types — duration over time (median; dots = <3 events)', y, MARGIN, PAGE_W,
+        durData, 'duration');
+    }
+  }
 
   // Hour-of-day histogram
   y = await renderOffscreenHourHistogramToPDF(doc, 'Seizures by hour of day', y, MARGIN, PAGE_W,
@@ -1064,6 +1085,212 @@ function renderPatternsStatsTable(doc, margin, y, pageW, measurements, seizures,
   y += 7;
 
   return y;
+}
+
+/**
+ * v1.3 — Compact "Seizures by type" list. Sits in the Patterns section just
+ * below the AM/PM stats table. One row per type, count right-aligned.
+ * Returns the updated y. Returns y unchanged if no seizures in range.
+ */
+function renderPatternsTypeCountList(doc, margin, y, pageW, seizures, settings) {
+  if (!seizures || !seizures.length) return y;
+  const counts = KCCharts.seizureTypeCounts(seizures, settings);
+  if (!counts.length) return y;
+
+  // Page-break safety
+  const lineH = 5;
+  const needed = 8 + counts.length * lineH + 4;
+  if (y + needed > 280) { doc.addPage(); y = margin; }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(45, 42, 38);
+  doc.text('Seizures by type', margin, y);
+  y += 5;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  const rightX = margin + (pageW - margin * 2);
+  const total = counts.reduce((a, c) => a + c.count, 0);
+
+  for (const c of counts) {
+    doc.text(c.label, margin, y);
+    doc.text(String(c.count), rightX, y, { align: 'right' });
+    y += lineH;
+  }
+
+  // Total separator
+  doc.setDrawColor(227, 216, 197);
+  doc.setLineWidth(0.2);
+  doc.line(margin, y - 2.5, rightX, y - 2.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Total events', margin, y);
+  doc.text(String(total), rightX, y, { align: 'right' });
+  y += 6;
+
+  return y;
+}
+
+/**
+ * v1.3 — Render a small-multiples grid of one mini-chart per seizure type
+ * to the PDF. Used for both Frequency and Duration views.
+ *
+ * `typesData` is the array returned by seizureTypeFrequencyByType /
+ * seizureTypeDurationByType.
+ * `mode` is 'frequency' or 'duration'.
+ */
+async function renderSeizureTypesGridToPDF(doc, title, y, margin, pageW, typesData, mode) {
+  if (!typesData || !typesData.length) return y;
+
+  const cols = 2;
+  const gap = 4;
+  const innerW = pageW - margin * 2;
+  const cellW = (innerW - gap * (cols - 1)) / cols;
+  const cellH = 38;
+  const canvasInsetY = 7;
+  const canvasH = cellH - canvasInsetY - 2;
+  const titleH = 7;
+
+  if (y + titleH + cellH + 6 > 280) { doc.addPage(); y = margin; }
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(45, 42, 38);
+  doc.text(title, margin, y);
+  y += titleH;
+
+  for (let i = 0; i < typesData.length; i += cols) {
+    if (y + cellH > 280) { doc.addPage(); y = margin; }
+
+    for (let c = 0; c < cols; c++) {
+      const idx = i + c;
+      if (idx >= typesData.length) break;
+      const t = typesData[idx];
+      const cellX = margin + c * (cellW + gap);
+
+      // Per-cell header line — type label + total
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(45, 42, 38);
+      const labelMax = cellW - 22;
+      let label = t.label;
+      if (doc.getTextWidth(label) > labelMax) {
+        while (label.length > 1 && doc.getTextWidth(label + '…') > labelMax) {
+          label = label.slice(0, -1);
+        }
+        label = label + '…';
+      }
+      doc.text(label, cellX, y + 3);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(138, 130, 120);
+      const subN = mode === 'duration' ? t.totalWithDuration : t.total;
+      const subLabel = mode === 'duration' ? `n=${subN} timed` : `n=${subN}`;
+      doc.text(subLabel, cellX + cellW, y + 3, { align: 'right' });
+
+      const dataUrl = await _renderTypeMiniToPNG(t.buckets, KCCharts.COLORS.terraDeep, mode);
+      if (dataUrl) {
+        doc.addImage(dataUrl, 'PNG', cellX, y + canvasInsetY, cellW, canvasH);
+      } else {
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.setTextColor(138, 130, 120);
+        doc.text('(Chart not available)', cellX, y + canvasInsetY + 5);
+      }
+    }
+
+    y += cellH + 2;
+  }
+
+  return y + 2;
+}
+
+/**
+ * Off-screen render one mini-chart and return its PNG data URL.
+ * Kept in sync with seizureTypeSmallMultipleChart() in charts.js, with
+ * larger fonts for print legibility.
+ */
+async function _renderTypeMiniToPNG(buckets, color, mode) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 260;
+  canvas.style.position = 'fixed';
+  canvas.style.left = '-9999px';
+  canvas.style.top = '0';
+  canvas.style.width = '600px';
+  canvas.style.height = '260px';
+  document.body.appendChild(canvas);
+
+  const fmtDur = (s) => {
+    if (s == null) return '—';
+    const r = Math.round(s);
+    const m = Math.floor(r / 60);
+    const rs = r % 60;
+    return `${m}:${String(rs).padStart(2, '0')}`;
+  };
+
+  try {
+    const labels = buckets.map(b => b.label);
+    let datasets;
+    let yMax;
+
+    if (mode === 'duration') {
+      const barData = buckets.map(b => (b.count >= 3 && b.median != null) ? b.median : null);
+      const dotPoints = [];
+      buckets.forEach((b, i) => {
+        if (b.count > 0 && b.count < 3) {
+          b.durations.forEach(d => { if (d != null) dotPoints.push({ x: labels[i], y: d }); });
+        }
+      });
+      datasets = [
+        { type: 'bar', data: barData, backgroundColor: color, borderRadius: 4, maxBarThickness: 36 },
+        { type: 'scatter', data: dotPoints, backgroundColor: color, borderColor: '#fffaf2', borderWidth: 1, pointRadius: 5, showLine: false }
+      ];
+      const allDur = [...barData.filter(v => v != null), ...dotPoints.map(p => p.y)];
+      yMax = allDur.length ? Math.max(...allDur) * 1.15 : 60;
+      if (yMax < 30) yMax = 30;
+    } else {
+      const counts = buckets.map(b => b.count);
+      datasets = [{ type: 'bar', data: counts, backgroundColor: color, borderRadius: 4, maxBarThickness: 36 }];
+      const maxCount = counts.length ? Math.max(...counts, 1) : 1;
+      yMax = Math.max(maxCount + 1, 3);
+    }
+
+    const chart = new Chart(canvas, {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: false,
+        animation: false,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 6, font: { size: 14 } } },
+          y: {
+            beginAtZero: true,
+            suggestedMax: yMax,
+            ticks: {
+              stepSize: mode === 'duration' ? undefined : 1,
+              precision: mode === 'duration' ? undefined : 0,
+              font: { size: 14 },
+              callback: mode === 'duration' ? (v) => fmtDur(v) : undefined
+            },
+            grid: { color: '#e3d8c5' }
+          }
+        }
+      }
+    });
+
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const dataUrl = canvas.toDataURL('image/png', 1.0);
+    chart.destroy();
+    return dataUrl;
+  } catch (err) {
+    console.warn('Type mini-chart render failed:', err);
+    return null;
+  } finally {
+    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+  }
 }
 
 /**

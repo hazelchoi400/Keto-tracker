@@ -455,6 +455,19 @@
       <p class="chart-note muted small" id="patternsKetoneNote">Terracotta dots along the bottom mark days a seizure was logged.</p>
     </div>
 
+    <div class="chart-card" id="patternsTypesCard">
+      <h3 id="patternsTypesTitle">Seizure types over time</h3>
+      <div class="types-section">
+        <h4 class="types-subhead">Frequency</h4>
+        <div class="types-grid" id="patternsTypesFrequencyGrid"></div>
+      </div>
+      <div class="types-section">
+        <h4 class="types-subhead">Duration <span class="muted small">(median per bucket; dots = fewer than 3 events)</span></h4>
+        <div class="types-grid" id="patternsTypesDurationGrid"></div>
+      </div>
+      <p class="chart-note muted small" id="patternsTypesNote">One mini-chart per seizure type recorded in this range. Rightmost bar may be a partial period.</p>
+    </div>
+
     <div class="chart-card">
       <h3>Seizures by hour of day</h3>
       <div class="chart-canvas-wrap"><canvas id="patternsHourChart"></canvas></div>
@@ -734,7 +747,7 @@
 
       <button type="button" class="btn-ghost" id="showWelcomeAgainBtn">Show welcome screen again</button>
 
-      <p class="about-version muted small">KetoCare · Version 1.2</p>
+      <p class="about-version muted small">KetoCare · Version 1.3</p>
     </div>
   </section>
 

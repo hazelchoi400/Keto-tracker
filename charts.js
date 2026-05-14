@@ -710,6 +710,329 @@ function lineChartCombined(canvasId, series, color, targetBand, markers, opts = 
 }
 
 /* =====================================================
+   v1.3 — Seizure types over time
+
+   Builds per-type time buckets so the dietitian/neurologist can see
+   "is the absence frequency coming down?" without overlaying ketones
+   (descriptive only — inference happens off-screen).
+
+   Bucket sizes are anchored on `toMs` and walk backwards. The right-most
+   bucket may be a partial period (today's week, this 30-day month).
+   ===================================================== */
+
+// Resolve a human-readable label from a seizure record + settings, without
+// depending on app.js's `state`. Keep this in sync with seizureTypeLabel()
+// in app.js — app.js's version is now a thin wrapper that passes settings.
+function resolveSeizureTypeLabel(seizure, settings) {
+  if (!seizure || !seizure.type) return 'Seizure';
+  if (seizure.type === 'other') {
+    const t = seizure.typeOther && seizure.typeOther.trim();
+    return t ? t : 'Other';
+  }
+  if (typeof seizure.type === 'string' && seizure.type.startsWith('custom:')) {
+    const idx = parseInt(seizure.type.split(':')[1], 10);
+    const list = (settings && settings.customSeizureTypes) || [];
+    return list[idx] || 'Custom';
+  }
+  return seizure.type.charAt(0).toUpperCase() + seizure.type.slice(1);
+}
+
+// Group key for a seizure — used to bucket events by type. We group all
+// `other` events together under a single "__other__" key (descriptions
+// vary by event, but the clinical question — "are unusual events becoming
+// less frequent?" — still applies to the pool).
+function _typeGroupKey(seizure) {
+  if (!seizure || !seizure.type) return '__unknown__';
+  if (seizure.type === 'other') return '__other__';
+  return seizure.type;
+}
+
+// Display label for a group key. The "Other" group gets a "(descriptions
+// vary)" suffix so a reader can see at a glance that the pool isn't a
+// single named type.
+function _typeGroupLabel(groupKey, sampleSeizure, settings) {
+  if (groupKey === '__other__') return 'Other (descriptions vary)';
+  if (groupKey === '__unknown__') return 'Seizure';
+  if (groupKey.startsWith('custom:')) {
+    return resolveSeizureTypeLabel(sampleSeizure, settings);
+  }
+  // Standard type — capitalise
+  return groupKey.charAt(0).toUpperCase() + groupKey.slice(1);
+}
+
+// Build bucket boundaries anchored on toMs and walking backwards.
+// bucket = 'week' → 7-day windows; bucket = 'month' → 30-day windows.
+// The rightmost bucket ends at toMs (may be partial — "this week so far").
+// The leftmost partial bucket (if any) is DROPPED so every visible bar
+// represents the same span. The honest signal is in the chart note:
+// "Rightmost bar may be a partial period."
+// Returns [{ start, end, label }] in chronological (left-to-right) order.
+function _buildBuckets(fromMs, toMs, bucket) {
+  const spanMs = bucket === 'month' ? 30 * 86400000 : 7 * 86400000;
+  const out = [];
+  let end = toMs;
+  // Walk back while we still have room for a full-span bucket OR while we're
+  // on the rightmost bucket (which is allowed to be partial against `toMs`).
+  while (end > fromMs) {
+    const start = end - spanMs + 1;
+    if (start < fromMs) break;       // would be a partial leftmost — drop
+    out.unshift({ start, end });
+    end = start - 1;
+  }
+  // If we wound up with zero buckets (range shorter than one span), force a
+  // single full-span bucket anchored on toMs so the chart still renders.
+  if (!out.length) {
+    out.push({ start: Math.max(toMs - spanMs + 1, fromMs), end: toMs });
+  }
+  const fmtShort = (ms) => {
+    const d = new Date(ms);
+    return d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
+  };
+  return out.map(b => ({ ...b, label: fmtShort(b.start) }));
+}
+
+// Median of a numeric array (returns null for empty input).
+function _median(arr) {
+  const v = arr.filter(x => x != null && !isNaN(x)).slice().sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+/* =====================================================
+   Per-type frequency over time
+
+   Returns [{ key, label, total, buckets: [{ start, end, label, count }] }]
+   - One entry per type that had >=1 event in range.
+   - Empty types filtered out.
+   - Sorted by total desc so most-frequent types come first.
+   ===================================================== */
+function seizureTypeFrequencyByType(seizures, settings, fromMs, toMs, bucket) {
+  const buckets = _buildBuckets(fromMs, toMs, bucket);
+  const groups = {};
+
+  for (const s of seizures) {
+    if (s.startTime < fromMs || s.startTime > toMs) continue;
+    const k = _typeGroupKey(s);
+    if (!groups[k]) groups[k] = { sample: s, events: [] };
+    groups[k].events.push(s);
+  }
+
+  const out = [];
+  for (const [key, g] of Object.entries(groups)) {
+    const typeBuckets = buckets.map(b => {
+      const count = g.events.filter(e => e.startTime >= b.start && e.startTime <= b.end).length;
+      return { start: b.start, end: b.end, label: b.label, count };
+    });
+    out.push({
+      key,
+      label: _typeGroupLabel(key, g.sample, settings),
+      total: g.events.length,
+      buckets: typeBuckets
+    });
+  }
+  out.sort((a, b) => b.total - a.total);
+  return out;
+}
+
+/* =====================================================
+   Per-type duration over time
+
+   Returns [{ key, label, totalWithDuration, buckets: [{ start, end, label,
+     count, median, durations: [secs...] }] }]
+   - Only events with a numeric durationSec are included.
+   - Types with zero timed events in range are filtered out.
+   - Per bucket: count = number of timed events, median = median seconds,
+     durations = raw list so the renderer can switch to dot-mode at count<3.
+   ===================================================== */
+function seizureTypeDurationByType(seizures, settings, fromMs, toMs, bucket) {
+  const buckets = _buildBuckets(fromMs, toMs, bucket);
+  const groups = {};
+
+  for (const s of seizures) {
+    if (s.startTime < fromMs || s.startTime > toMs) continue;
+    if (s.durationSec == null || isNaN(s.durationSec)) continue;
+    const k = _typeGroupKey(s);
+    if (!groups[k]) groups[k] = { sample: s, events: [] };
+    groups[k].events.push(s);
+  }
+
+  const out = [];
+  for (const [key, g] of Object.entries(groups)) {
+    const typeBuckets = buckets.map(b => {
+      const inBucket = g.events.filter(e => e.startTime >= b.start && e.startTime <= b.end);
+      const durations = inBucket.map(e => e.durationSec);
+      return {
+        start: b.start,
+        end: b.end,
+        label: b.label,
+        count: durations.length,
+        median: _median(durations),
+        durations
+      };
+    });
+    out.push({
+      key,
+      label: _typeGroupLabel(key, g.sample, settings),
+      totalWithDuration: g.events.length,
+      buckets: typeBuckets
+    });
+  }
+  out.sort((a, b) => b.totalWithDuration - a.totalWithDuration);
+  return out;
+}
+
+// Format seconds as mm:ss for tooltip display.
+function _fmtDuration(secs) {
+  if (secs == null) return '—';
+  const s = Math.round(secs);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, '0')}`;
+}
+
+/* =====================================================
+   Small-multiples mini-chart for one seizure type
+
+   One canvas, one type, one metric (frequency OR duration).
+   In duration mode, buckets with count < 3 render their individual events
+   as dots overlaid on the column; buckets with count >= 3 render a bar
+   at the median height. This makes "this is 2 readings, not a real
+   average" visually obvious.
+   ===================================================== */
+function seizureTypeSmallMultipleChart(canvasId, buckets, color, mode) {
+  applyChartDefaults();
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+
+  const labels = buckets.map(b => b.label);
+  let datasets;
+  let yMax;
+  let tooltipLabelCallback;
+
+  if (mode === 'duration') {
+    const barData = buckets.map(b => (b.count >= 3 && b.median != null) ? b.median : null);
+    const dotPoints = [];
+    buckets.forEach((b, i) => {
+      if (b.count > 0 && b.count < 3) {
+        b.durations.forEach(d => { if (d != null) dotPoints.push({ x: labels[i], y: d }); });
+      }
+    });
+
+    datasets = [
+      {
+        type: 'bar',
+        label: 'Median',
+        data: barData,
+        backgroundColor: color,
+        borderRadius: 4,
+        maxBarThickness: 22
+      },
+      {
+        type: 'scatter',
+        label: 'Events',
+        data: dotPoints,
+        backgroundColor: color,
+        borderColor: '#fffaf2',
+        borderWidth: 1,
+        pointRadius: 3.5,
+        pointHoverRadius: 4.5,
+        showLine: false
+      }
+    ];
+
+    const allDur = [
+      ...barData.filter(v => v != null),
+      ...dotPoints.map(p => p.y)
+    ];
+    yMax = allDur.length ? Math.max(...allDur) * 1.15 : 60;
+    if (yMax < 30) yMax = 30;
+
+    tooltipLabelCallback = (item) => {
+      if (item.dataset.type === 'scatter') {
+        return `Event: ${_fmtDuration(item.parsed.y)}`;
+      }
+      const bucket = buckets[item.dataIndex];
+      const n = bucket ? bucket.count : 0;
+      return `Median: ${_fmtDuration(item.parsed.y)} (n=${n})`;
+    };
+  } else {
+    const counts = buckets.map(b => b.count);
+    datasets = [{
+      type: 'bar',
+      label: 'Events',
+      data: counts,
+      backgroundColor: color,
+      borderRadius: 4,
+      maxBarThickness: 22
+    }];
+    const maxCount = counts.length ? Math.max(...counts, 1) : 1;
+    yMax = Math.max(maxCount + 1, 3);
+    tooltipLabelCallback = (item) => {
+      const n = item.parsed.y;
+      return `${n} event${n === 1 ? '' : 's'}`;
+    };
+  }
+
+  _charts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => (items && items.length) ? (items[0].label || '') : '',
+            label: tooltipLabelCallback
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 6, font: { size: 10 } }
+        },
+        y: {
+          beginAtZero: true,
+          suggestedMax: yMax,
+          ticks: {
+            stepSize: mode === 'duration' ? undefined : 1,
+            precision: mode === 'duration' ? undefined : 0,
+            font: { size: 10 },
+            callback: mode === 'duration'
+              ? (v) => _fmtDuration(v)
+              : undefined
+          },
+          grid: { color: CHART_COLORS.line, drawBorder: false }
+        }
+      }
+    }
+  });
+}
+
+/* =====================================================
+   Seizures-by-type count tally (for the new Patterns stat card)
+
+   Returns [{ key, label, count }] sorted desc by count.
+   Empty types filtered out.
+   ===================================================== */
+function seizureTypeCounts(seizures, settings) {
+  const groups = {};
+  for (const s of seizures) {
+    const k = _typeGroupKey(s);
+    if (!groups[k]) groups[k] = { sample: s, count: 0 };
+    groups[k].count++;
+  }
+  return Object.entries(groups)
+    .map(([key, g]) => ({ key, label: _typeGroupLabel(key, g.sample, settings), count: g.count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/* =====================================================
    Exports
    ===================================================== */
 
@@ -731,5 +1054,11 @@ window.KCCharts = {
   hourHistogramChart,
   computeStats,
   destroyChart,
-  suggestedYMax
+  suggestedYMax,
+  // v1.3
+  resolveSeizureTypeLabel,
+  seizureTypeFrequencyByType,
+  seizureTypeDurationByType,
+  seizureTypeSmallMultipleChart,
+  seizureTypeCounts
 };

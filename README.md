@@ -2,7 +2,7 @@
 
 A paediatric ketogenic diet tracker for parents of children with epilepsy. Logs ketones, glucose, GKI, and seizures with timing detail. Generates clinic-ready PDF summaries for dietitian review.
 
-Current version: **v1.3**.
+Current version: **v1.4**.
 
 ## Deploy to GitHub Pages
 
@@ -84,9 +84,11 @@ Accessed via "Look for patterns →" link at the bottom of Trends. Defaults to 9
 - **JSON Backup/Restore** — full app state. Restore via the "Restore from backup" section on the Export screen.
 
 ### Other
-- Local notification reminders (multiple per day)
+- **Visible app version + "Check for updates" button (v1.4)** in Settings, so parents on desktop browsers aren't stuck on stale cached versions without realising
+- **"What's new" changelog (v1.4)** on the About page
 - **Works fully offline** after first load — service worker caches the app shell
 - All data stored locally in IndexedDB — never leaves the device unless exported manually
+- Reminder feature was removed in v1.4 — PWAs can't fire reliable background alarms (would need either a server or a native app)
 
 ## Deferred to later versions
 

@@ -5,7 +5,7 @@ A paediatric ketogenic diet tracker PWA for parents/carers of children with epil
 Built by Hazel Choi (UK paediatric dietitian).
 Deployed at: `https://hazelchoi400.github.io/Keto-tracker/` (GitHub Pages).
 
-Current version: **v1.3**.
+Current version: **v1.4**.
 
 ---
 
@@ -166,6 +166,24 @@ Bucketing for the seizure-types-over-time view (and the Patterns data XLSX tab) 
 These are 30/90-day windows ending today, not calendar months/quarters — chosen to avoid the awkwardness of February-length variance and to keep the rightmost bucket always being "this period so far". Title shows the active bucketing (e.g. "Seizure types over time — monthly") so the reader knows what each bar represents.
 
 Custom range is deliberately Patterns-only, not Trends. Trends is the calm-and-skimmable screen; adding a custom picker there muddies the school-run mental model. Patterns is the "you want to look harder" screen and the picker fits.
+
+### Update visibility (v1.4)
+Service worker caching is great for offline but creates a real UX problem on desktop browsers: Chrome can cling to the old cached SW indefinitely and the parent has no way of knowing they're on a stale version. v1.4 surfaces this three ways:
+
+1. **Running version label + "Check for updates" button** in Settings → Updates. The button calls `reg.update()` then reports the outcome via toast — either "You're on the latest version", "Update ready — tap Refresh on the banner", or "Couldn't reach the server". `APP_VERSION` constant at the top of `app.js` is the single source of truth; keep it in sync with `CACHE_NAME` in `sw.js`.
+2. **`visibilitychange` re-check.** When the tab is brought back to focus, `app.js` calls `reg.update()` automatically. Catches the desktop case where someone leaves the tab open for days.
+3. **"What's new" expandable panel** on the About page. Captures the v1.2/v1.3/v1.4 changelog inline. Each version bump should add an entry at the top of this list in `index.html`. This is the only way parents discover new features — there's no email list or announcement channel.
+
+The combined effect: a parent on Mac Chrome who's been running stale for a week can either wait for `visibilitychange` to refresh them, or proactively tap "Check for updates", and either way they'll find out what's available.
+
+### Reminders were removed (v1.4)
+The `reminders: []` field stays on the schema so older backups restore cleanly, but the UI is gone. PWAs can't fire reliable background timers — `setTimeout` only runs while the page is open, and browsers suspend idle pages within seconds-to-minutes of backgrounding. The previous implementation was silently broken: reminders only fired if the app happened to be open and visible at the right moment.
+
+Real background notifications would need either:
+- **Push API + a server scheduler** (which collapses the local-only architecture and brings back NHS DCB0129/DCB0160 + GDPR DPIA + auth complexity), or
+- **A native iOS/Android app** (£79/yr Apple, App Store review, no longer a PWA-on-GitHub-Pages).
+
+Neither fits Phase 1. Settings → Reminders now has a one-line honest note explaining why and suggests parents set a phone alarm instead. If/when the architecture allows it, re-add via the Push API route — see deferred features.
 
 ### CSV / "research" framing was rejected
 Earlier iteration had a CSV-zip export with one-hot encoded triggers, unix timestamps, etc. Pulled back: "research" implies HRA approval and ethics review. The single XLSX with clinician-friendly columns is the right primary format for current use.
@@ -346,4 +364,4 @@ Most apps in this space die between Phase 1 and Phase 2 because the founder neve
 
 ---
 
-*Last updated: May 2026 (v1.3)*
+*Last updated: May 2026 (v1.4)*

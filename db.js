@@ -68,7 +68,10 @@ const DEFAULT_SETTINGS = {
   // Parent-defined seizure types (additive to the standard pills)
   // Stored as an array of short labels, e.g. ["Eye blink (focal)", "Head drop"]
   customSeizureTypes: [],
-  reminders: [], // ['07:00', '12:00']
+  // Legacy field — reminders feature removed in v1.4 (PWAs can't fire
+  // reliable background alarms). Kept on the schema so older backups
+  // restore cleanly; not surfaced anywhere in the UI.
+  reminders: [],
   welcomeDismissed: false
 };
 

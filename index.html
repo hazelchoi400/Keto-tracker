@@ -690,11 +690,15 @@
       <div class="custom-type-list" id="customSeizureTypeList"></div>
       <button type="button" class="btn-ghost" id="addCustomSeizureTypeBtn">+ Add seizure type</button>
 
-      <p class="section-heading">Reminders</p>
-      <p class="muted small">Times to remind you to check ketones. Notifications work best when this app is added to your home screen.</p>
+      <p class="section-heading">Updates</p>
+      <p class="muted small">KetoCare updates roll out within a day or two of being released. If you're using a desktop browser the new version may take longer to appear automatically — tap below to check now.</p>
+      <div class="updates-block">
+        <p class="updates-current"><span class="muted small">Running</span> <strong id="settingsVersionLabel">—</strong></p>
+        <button type="button" class="btn-ghost" id="checkForUpdatesBtn">Check for updates</button>
+      </div>
 
-      <div class="reminder-list" id="reminderList"></div>
-      <button type="button" class="btn-ghost" id="addReminderBtn">+ Add reminder time</button>
+      <p class="section-heading">Reminders</p>
+      <p class="muted small">Reminders aren't supported in this version. iOS and most browsers don't let web apps fire alarms in the background reliably. Most parents we know set a separate alarm on their phone for ketone checks.</p>
 
       <div class="form-actions">
         <button type="submit" class="btn-primary full">Save settings</button>
@@ -742,7 +746,7 @@
       <p><em>Export</em> lets you download a Summary report (PDF, good for clinic) or Detailed records (spreadsheet, good for closer review). You can email these or share them however you'd normally share documents.</p>
 
       <p class="about-subhead"><strong>Settings</strong></p>
-      <p>Set your child's name, target ranges, and reminder times in Settings. Targets and reminder times are usually agreed with your dietitian.</p>
+      <p>Set your child's name, target ranges, and alert thresholds in Settings. These are usually agreed with your dietitian.</p>
 
       <h3 class="about-section-title">In an emergency</h3>
       <p>Follow your child's emergency care plan. If you don't have one, or you're unsure what to do, contact your local emergency services straight away.</p>
@@ -758,7 +762,35 @@
 
       <button type="button" class="btn-ghost" id="showWelcomeAgainBtn">Show welcome screen again</button>
 
-      <p class="about-version muted small">KetoCare · Version 1.3</p>
+      <div class="about-version-block">
+        <p class="about-version muted small">KetoCare · Version 1.4</p>
+        <button type="button" class="btn-link about-whatsnew-toggle" id="whatsNewToggle" aria-expanded="false" aria-controls="whatsNewPanel">What's new</button>
+      </div>
+
+      <div class="whats-new-panel hidden" id="whatsNewPanel" role="region" aria-label="Changelog">
+        <h4 class="whats-new-version">v1.4</h4>
+        <ul>
+          <li>Visible app version + "Check for updates" button in Settings.</li>
+          <li>"What's new" changelog (you're reading it).</li>
+          <li>Reminders removed — they were unreliable in browsers. A short note explains why in Settings.</li>
+        </ul>
+
+        <h4 class="whats-new-version">v1.3</h4>
+        <ul>
+          <li><strong>Patterns screen — seizure types over time.</strong> A small grid of per-type charts showing frequency and median duration across the period.</li>
+          <li><strong>Patterns — seizures by type count panel</strong> alongside the AM/PM stats.</li>
+          <li><strong>Patterns — custom date range</strong> alongside the 7d / 30d / 90d chips, capped at one year.</li>
+          <li><strong>Excel export expanded.</strong> Two new tabs: <em>Daily detail</em> (long-format interleave of all events) and <em>Patterns data</em> (the in-app Patterns views as cells). ISO date columns added to Measurements and Seizures for joining across tabs.</li>
+        </ul>
+
+        <h4 class="whats-new-version">v1.2</h4>
+        <ul>
+          <li><strong>Patterns screen</strong> — exploratory views (AM/PM ketone split with seizure markers, hour-of-day histogram, day-of-week heatmap, triggers tally). Accessed from the bottom of Trends.</li>
+          <li>Custom seizure types — parent-defined labels alongside the standard ones.</li>
+          <li>Alert thresholds for hyperketosis and hypoglycaemia, with terracotta highlighting.</li>
+          <li>Custom diet ratio (free text) for unusual variants like 3.5:1.</li>
+        </ul>
+      </div>
     </div>
   </section>
 

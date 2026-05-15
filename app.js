@@ -1273,8 +1273,8 @@ async function populateSettingsForm() {
   document.getElementById('settingGKIMax').value = s.gkiMax ?? '';
   document.getElementById('settingKetoneAlertHigh').value = s.ketoneAlertHigh ?? '';
   document.getElementById('settingGlucoseAlertLow').value = s.glucoseAlertLow ?? '';
-  renderReminderList(s.reminders || []);
   renderCustomSeizureTypeList(s.customSeizureTypes || []);
+  renderSettingsVersionLabel();
 }
 
 function toggleCustomRatioField(show) {
@@ -1300,29 +1300,10 @@ function getCustomSeizureTypes() {
     .map(i => i.value.trim()).filter(Boolean);
 }
 
-function renderReminderList(reminders) {
-  const list = document.getElementById('reminderList');
-  list.innerHTML = '';
-  reminders.forEach((time, i) => {
-    const row = document.createElement('div');
-    row.className = 'reminder-row';
-    row.innerHTML = `
-      <input type="time" value="${time}" data-idx="${i}" />
-      <button type="button" class="reminder-remove" data-remove="${i}" aria-label="Remove">×</button>
-    `;
-    list.appendChild(row);
-  });
-}
-
-function getReminderTimes() {
-  return [...document.querySelectorAll('#reminderList input[type="time"]')]
-    .map(i => i.value).filter(Boolean);
-}
-
 async function handleSettingsSubmit(e) {
   e.preventDefault();
   const settings = {
-    ...(state.settings || {}),  // preserve fields not in the form (e.g. welcomeDismissed)
+    ...(state.settings || {}),  // preserve fields not in the form (e.g. welcomeDismissed, reminders)
     childName: document.getElementById('settingChildName').value.trim(),
     dob: document.getElementById('settingDOB').value,
     variant: state.selectedSettingVariant,
@@ -1334,58 +1315,84 @@ async function handleSettingsSubmit(e) {
     gkiMax: parseFloat(document.getElementById('settingGKIMax').value) || null,
     ketoneAlertHigh: parseFloat(document.getElementById('settingKetoneAlertHigh').value) || null,
     glucoseAlertLow: parseFloat(document.getElementById('settingGlucoseAlertLow').value) || null,
-    customSeizureTypes: getCustomSeizureTypes(),
-    reminders: getReminderTimes()
+    customSeizureTypes: getCustomSeizureTypes()
   };
   await KCDB.saveSettings(settings);
   state.settings = settings;
-  scheduleReminders(settings.reminders);
   toast('Settings saved');
   navigateTo('home');
 }
 
 /* =====================================================
-   REMINDERS (local notifications)
+   v1.4 — Update visibility
+
+   The service worker quietly caches the app shell so we can work offline,
+   which means parents on desktop browsers can get stuck on an old version
+   without realising. This block:
+     - exposes the running cache name in Settings + About (via APP_VERSION)
+     - lets the user trigger a fresh update check with a toast outcome
+     - re-checks for updates whenever the tab becomes visible again,
+       so a browser that's been backgrounded all day still catches up.
    ===================================================== */
 
-async function ensureNotificationPermission() {
-  if (!('Notification' in window)) return false;
-  if (Notification.permission === 'granted') return true;
-  if (Notification.permission === 'denied')  return false;
-  const result = await Notification.requestPermission();
-  return result === 'granted';
+// Single source of truth for the version label shown in-app. Keep in
+// sync with CACHE_NAME in sw.js. The "Check for updates" button compares
+// against this to decide what to tell the user.
+const APP_VERSION = 'v1.4';
+
+// Captured by registerServiceWorker() so the button has a reference.
+let _swRegistration = null;
+// Set to true once we've shown the update banner — used to drive the
+// "Check for updates" toast outcome when a new version is already waiting.
+let _updateAvailable = false;
+
+function renderSettingsVersionLabel() {
+  const el = document.getElementById('settingsVersionLabel');
+  if (el) el.textContent = APP_VERSION;
 }
 
-let _reminderTimers = [];
-function scheduleReminders(times) {
-  _reminderTimers.forEach(t => clearTimeout(t));
-  _reminderTimers = [];
-  if (!times || !times.length) return;
-  ensureNotificationPermission();
-
-  for (const t of times) {
-    const [hh, mm] = t.split(':').map(Number);
-    const next = new Date();
-    next.setHours(hh, mm, 0, 0);
-    if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1);
-    const delay = next.getTime() - Date.now();
-    _reminderTimers.push(setTimeout(() => {
-      showReminder(t);
-      // Reschedule for the next day
-      scheduleReminders(getReminderTimes());
-    }, delay));
+async function handleCheckForUpdates() {
+  const btn = document.getElementById('checkForUpdatesBtn');
+  if (!btn) return;
+  if (!('serviceWorker' in navigator) || !_swRegistration) {
+    toast('Updates not supported on this browser');
+    return;
+  }
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = 'Checking…';
+  try {
+    await _swRegistration.update();
+    // After update() resolves the SW may be installing in the background.
+    // We give it a brief moment, then look at what's there.
+    setTimeout(() => {
+      const waiting = _swRegistration.waiting;
+      const installing = _swRegistration.installing;
+      if (waiting || _updateAvailable) {
+        toast('Update ready — tap Refresh on the banner');
+      } else if (installing) {
+        toast('Downloading update…');
+      } else {
+        toast(`You're on the latest version (${APP_VERSION})`);
+      }
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }, 1500);
+  } catch (err) {
+    console.warn('Update check failed', err);
+    toast('Couldn\'t reach the server — try again later');
+    btn.disabled = false;
+    btn.textContent = originalText;
   }
 }
 
-function showReminder(time) {
-  if (Notification.permission === 'granted') {
-    new Notification('KetoCare reminder', {
-      body: `Time to check ketones (${time})`,
-      icon: 'icon.png'
-    });
-  } else {
-    toast(`Reminder: time to check ketones (${time})`);
-  }
+function toggleWhatsNewPanel() {
+  const btn = document.getElementById('whatsNewToggle');
+  const panel = document.getElementById('whatsNewPanel');
+  if (!btn || !panel) return;
+  const isOpen = !panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', isOpen);
+  btn.setAttribute('aria-expanded', String(!isOpen));
 }
 
 /* =====================================================
@@ -1520,19 +1527,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   setupChipGroup('settingDefaultKetone', false, (v) => { state.selectedSettingDefaultKetone = v; });
   document.getElementById('settingsForm').addEventListener('submit', handleSettingsSubmit);
-  document.getElementById('addReminderBtn').addEventListener('click', () => {
-    const current = getReminderTimes();
-    current.push('08:00');
-    renderReminderList(current);
-  });
-  document.getElementById('reminderList').addEventListener('click', (e) => {
-    if (e.target.matches('[data-remove]')) {
-      const idx = parseInt(e.target.dataset.remove, 10);
-      const current = getReminderTimes();
-      current.splice(idx, 1);
-      renderReminderList(current);
-    }
-  });
+
+  // v1.4 — Updates block
+  document.getElementById('checkForUpdatesBtn').addEventListener('click', handleCheckForUpdates);
 
   // Custom seizure types — add / remove
   document.getElementById('addCustomSeizureTypeBtn').addEventListener('click', () => {
@@ -1594,8 +1591,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     navigateTo('welcome');
   });
 
-  // Schedule reminders if any
-  scheduleReminders((state.settings.reminders) || []);
+  // v1.4 — What's new toggle
+  const whatsNewBtn = document.getElementById('whatsNewToggle');
+  if (whatsNewBtn) whatsNewBtn.addEventListener('click', toggleWhatsNewPanel);
+
+  // v1.4 — Re-check for SW updates when the tab is brought back to focus.
+  // Catches the desktop case where a parent leaves the tab open for days;
+  // without this, Chrome can cling to the old SW indefinitely.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (_swRegistration) _swRegistration.update().catch(() => {});
+  });
 
   // Initial render
   renderHome();
@@ -1603,11 +1609,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Register service worker for offline support + update detection
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').then((reg) => {
+      _swRegistration = reg;
       // Check for updates each time the app starts
       reg.update().catch(() => {});
 
       // If a new SW is already waiting (installed but not yet active), show banner now
       if (reg.waiting && navigator.serviceWorker.controller) {
+        _updateAvailable = true;
         showUpdateBanner(reg.waiting);
       }
 
@@ -1618,6 +1626,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         newWorker.addEventListener('statechange', () => {
           // 'installed' + an existing controller means an update has arrived
           if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            _updateAvailable = true;
             showUpdateBanner(newWorker);
           }
         });

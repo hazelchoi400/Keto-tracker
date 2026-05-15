@@ -109,6 +109,11 @@
       </button>
     </div>
 
+    <div class="home-version-footer">
+      <span>Running <strong id="homeVersionLabel">—</strong></span>
+      <button type="button" class="home-version-check" id="checkForUpdatesBtn">Check for updates</button>
+    </div>
+
     <nav class="bottom-nav">
       <button data-go="home" class="navbtn active">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
@@ -690,16 +695,6 @@
       <div class="custom-type-list" id="customSeizureTypeList"></div>
       <button type="button" class="btn-ghost" id="addCustomSeizureTypeBtn">+ Add seizure type</button>
 
-      <p class="section-heading">Updates</p>
-      <p class="muted small">KetoCare updates roll out within a day or two of being released. If you're using a desktop browser the new version may take longer to appear automatically — tap below to check now.</p>
-      <div class="updates-block">
-        <p class="updates-current"><span class="muted small">Running</span> <strong id="settingsVersionLabel">—</strong></p>
-        <button type="button" class="btn-ghost" id="checkForUpdatesBtn">Check for updates</button>
-      </div>
-
-      <p class="section-heading">Reminders</p>
-      <p class="muted small">Reminders aren't supported in this version. iOS and most browsers don't let web apps fire alarms in the background reliably. Most parents we know set a separate alarm on their phone for ketone checks.</p>
-
       <div class="form-actions">
         <button type="submit" class="btn-primary full">Save settings</button>
       </div>
@@ -746,7 +741,7 @@
       <p><em>Export</em> lets you download a Summary report (PDF, good for clinic) or Detailed records (spreadsheet, good for closer review). You can email these or share them however you'd normally share documents.</p>
 
       <p class="about-subhead"><strong>Settings</strong></p>
-      <p>Set your child's name, target ranges, and alert thresholds in Settings. These are usually agreed with your dietitian.</p>
+      <p>Set your child's name, target ranges, and alert thresholds in Settings. These are usually agreed with your dietitian. KetoCare doesn't send reminder notifications — browsers can't reliably wake the app in the background, so most parents set a phone alarm for ketone checks.</p>
 
       <h3 class="about-section-title">In an emergency</h3>
       <p>Follow your child's emergency care plan. If you don't have one, or you're unsure what to do, contact your local emergency services straight away.</p>
@@ -770,9 +765,8 @@
       <div class="whats-new-panel hidden" id="whatsNewPanel" role="region" aria-label="Changelog">
         <h4 class="whats-new-version">v1.4</h4>
         <ul>
-          <li>Visible app version + "Check for updates" button in Settings.</li>
+          <li>Small "Running version" indicator with a "Check for updates" link at the bottom of the Home screen, so it's easy to see whether your app is up to date.</li>
           <li>"What's new" changelog (you're reading it).</li>
-          <li>Reminders removed — they were unreliable in browsers. A short note explains why in Settings.</li>
         </ul>
 
         <h4 class="whats-new-version">v1.3</h4>

@@ -207,6 +207,9 @@ async function renderHome() {
   const todayStart = new Date(); todayStart.setHours(0,0,0,0);
   const todayCount = seizures.filter(s => s.startTime >= todayStart.getTime()).length;
   el('todaySeizures').textContent = todayCount;
+
+  // v1.4 — keep the small "Running vX.X" footer in sync
+  renderHomeVersionLabel();
 }
 
 /* =====================================================
@@ -1274,7 +1277,6 @@ async function populateSettingsForm() {
   document.getElementById('settingKetoneAlertHigh').value = s.ketoneAlertHigh ?? '';
   document.getElementById('settingGlucoseAlertLow').value = s.glucoseAlertLow ?? '';
   renderCustomSeizureTypeList(s.customSeizureTypes || []);
-  renderSettingsVersionLabel();
 }
 
 function toggleCustomRatioField(show) {
@@ -1346,8 +1348,11 @@ let _swRegistration = null;
 // "Check for updates" toast outcome when a new version is already waiting.
 let _updateAvailable = false;
 
-function renderSettingsVersionLabel() {
-  const el = document.getElementById('settingsVersionLabel');
+// v1.4 — Write the running version into the small footer on the Home
+// screen. Called from renderHome() each time Home is shown so the label
+// stays in sync if APP_VERSION changes underneath us.
+function renderHomeVersionLabel() {
+  const el = document.getElementById('homeVersionLabel');
   if (el) el.textContent = APP_VERSION;
 }
 

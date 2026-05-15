@@ -1144,22 +1144,44 @@ body::before {
 }
 
 /* =====================================================
-   Updates block (Settings) + What's new (About)  — v1.4
+   Home version footer + What's new (About)  — v1.4
    ===================================================== */
 
-.updates-block {
+/* Small, muted row at the bottom of the Home screen. Sits between
+   the primary action buttons and the fixed bottom-nav. Deliberately
+   low-contrast and small — informational, not a prominent control. */
+.home-version-footer {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  flex-wrap: wrap;
-  margin: 0.4rem 0 0.2rem;
+  justify-content: center;
+  gap: 0.7rem;
+  margin: 1.6rem auto 0.4rem;
+  padding-bottom: calc(5.5rem + var(--safe-bottom)); /* clear the fixed bottom-nav */
+  font-size: 0.72rem;
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
 }
-.updates-current {
-  margin: 0;
-  font-size: 0.95rem;
-  color: var(--ink);
+.home-version-footer strong {
+  font-weight: 600;
+  color: var(--ink-mute);
 }
-.updates-current strong { font-weight: 600; }
+.home-version-footer .home-version-check {
+  background: transparent;
+  border: none;
+  padding: 0.15rem 0.25rem;
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--ink-mute);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.home-version-footer .home-version-check:hover { color: var(--ink); }
+.home-version-footer .home-version-check:disabled {
+  opacity: 0.55;
+  cursor: default;
+  text-decoration: none;
+}
 
 .about-version-block {
   display: flex;

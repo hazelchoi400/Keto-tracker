@@ -285,32 +285,17 @@ function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
   rows.push([]); // blank
   rows.push(['', ...bucketLabels, 'Total']);
 
-  // Seizure types — one row per type, then a totals row
-  if (typesTable.types.length) {
-    for (const t of typesTable.types) {
-      const row = [t.label];
-      for (const c of t.cells) {
-        row.push(c.count > 0 ? c.count : '');
-      }
-      row.push(t.totalCount);
-      rows.push(row);
-    }
-    // "All seizures" total per bucket
-    const allRow = ['All seizures'];
-    for (let i = 0; i < buckets.length; i++) {
-      const v = typesTable.types.reduce((a, t) => a + (t.cells[i] ? t.cells[i].count : 0), 0);
-      allRow.push(v > 0 ? v : '');
-    }
-    allRow.push(typesTable.types.reduce((a, t) => a + t.totalCount, 0));
-    rows.push(allRow);
-  } else {
-    rows.push(['(no seizures logged in this period)']);
-  }
+  /* ============================================================
+     v1.5 layout — four content chunks separated by blank rows:
+       1. Physiology means (ketone AM/PM, glucose, GKI, readings)
+       2. Seizure types — frequency
+       3. Seizure types — total duration (mm:ss)
+       4. Seizure types — median duration (mm:ss)
+     Then an outcome block (seizure-free days, rescue med uses) at
+     the bottom, then a notes block.
+     ============================================================ */
 
-  // Blank row
-  rows.push([]);
-
-  // Physiology + treatment summary rows
+  // Shared row-builder for label + per-bucket + Total
   const physRow = (label, valuesPerBucket, totalValue) => {
     const r = [label];
     for (const v of valuesPerBucket) r.push(v === '' || v == null ? '' : v);
@@ -318,32 +303,113 @@ function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
     return r;
   };
 
-  // Compute totals row-by-row from the underlying raw arrays so the Total
-  // column is the true grand stat rather than a mean-of-means.
-  const allKetoneAM = [].concat(...cells.map(c => c.ketoneAM));
-  const allKetonePM = [].concat(...cells.map(c => c.ketonePM));
-  const allGlucose  = [].concat(...cells.map(c => c.glucose));
-  const allGKI      = [].concat(...cells.map(c => c.gki));
+  // Grand-total aggregates over the whole range, built from raw arrays so
+  // the Total column reflects the true grand statistic rather than a
+  // mean-of-means.
+  const allKetoneAM  = [].concat(...cells.map(c => c.ketoneAM));
+  const allKetonePM  = [].concat(...cells.map(c => c.ketonePM));
+  const allGlucose   = [].concat(...cells.map(c => c.glucose));
+  const allGKI       = [].concat(...cells.map(c => c.gki));
   const allDurations = [].concat(...cells.map(c => c.durations));
 
-  rows.push(physRow('Mean blood ketone — AM (mmol/L)', cells.map(c => meanOrDash(c.ketoneAM)), meanOrDash(allKetoneAM)));
-  rows.push(physRow('Mean blood ketone — PM (mmol/L)', cells.map(c => meanOrDash(c.ketonePM)), meanOrDash(allKetonePM)));
-  rows.push(physRow('Mean glucose (mmol/L)',           cells.map(c => meanOrDash(c.glucose)),  meanOrDash(allGlucose)));
-  rows.push(physRow('Mean GKI',                        cells.map(c => meanOrDash(c.gki)),      meanOrDash(allGKI)));
-  rows.push(physRow('Readings logged',                 cells.map(c => c.readings || ''),       sum(cells.map(c => c.readings))));
+  /* ---------- Chunk 1: physiology ---------- */
+  rows.push(physRow('Mean blood ketone — AM (mmol/L)', cells.map(c => meanOrDash(c.ketoneAM)),  meanOrDash(allKetoneAM)));
+  rows.push(physRow('Mean blood ketone — PM (mmol/L)', cells.map(c => meanOrDash(c.ketonePM)),  meanOrDash(allKetonePM)));
+  rows.push(physRow('Mean glucose (mmol/L)',           cells.map(c => meanOrDash(c.glucose)),   meanOrDash(allGlucose)));
+  rows.push(physRow('Mean GKI',                        cells.map(c => meanOrDash(c.gki)),       meanOrDash(allGKI)));
+  rows.push(physRow('Readings logged',                 cells.map(c => c.readings || ''),        sum(cells.map(c => c.readings))));
+  rows.push([]); // blank
 
-  // Blank row
-  rows.push([]);
+  /* ---------- Chunk 2: seizure types — frequency ---------- */
+  if (typesTable.types.length) {
+    for (const t of typesTable.types) {
+      rows.push(physRow(t.label, t.cells.map(c => c.count > 0 ? c.count : ''), t.totalCount));
+    }
+    // All-types aggregate row (matches the in-app frequency-table totals row)
+    const allRowVals = buckets.map((_, i) =>
+      typesTable.types.reduce((acc, t) => acc + (t.cells[i] ? t.cells[i].count : 0), 0)
+    );
+    rows.push(physRow('All seizures', allRowVals.map(v => v > 0 ? v : ''),
+                      typesTable.types.reduce((a, t) => a + t.totalCount, 0)));
+  } else {
+    rows.push(['(no seizures logged in this period)']);
+  }
+  rows.push([]); // blank
 
-  // Treatment / outcome rows
-  rows.push(physRow('Seizure-free days',               cells.map(c => c.seizureFreeDays),      sum(cells.map(c => c.seizureFreeDays))));
-  rows.push(physRow('Total seizure duration (mm:ss)',  cells.map(c => c.durations.length ? fmtDuration(c.durations.reduce((a,b) => a+b, 0)) : ''),
-                                                       fmtDuration(allDurations.length ? allDurations.reduce((a,b) => a+b, 0) : '')));
-  rows.push(physRow('Median seizure duration (mm:ss)', cells.map(c => fmtDuration(medianOrDash(c.durations))), fmtDuration(medianOrDash(allDurations))));
-  rows.push(physRow('Rescue med uses',                 cells.map(c => c.rescueUses || ''),     sum(cells.map(c => c.rescueUses))));
+  /* ---------- Chunk 3: seizure types — total duration ---------- */
+  if (typesTable.types.length) {
+    let anyDuration = false;
+    for (const t of typesTable.types) {
+      // Per-bucket: sum of seconds in that bucket (blank if no events)
+      const perBucket = t.cells.map(c => c.durations.length ? fmtDuration(sum(c.durations)) : '');
+      // Per-type Total = grand total seconds across the range
+      const typeTotal = t.totalDurations.length ? fmtDuration(sum(t.totalDurations)) : '';
+      if (t.totalDurations.length) anyDuration = true;
+      rows.push(physRow(t.label, perBucket, typeTotal));
+    }
+    // Cross-type Total seizure duration row (sums across all types per bucket)
+    const totalRowVals = buckets.map((_, i) => {
+      const all = [].concat(...typesTable.types.map(t => t.cells[i].durations));
+      return all.length ? fmtDuration(sum(all)) : '';
+    });
+    const grandTotal = allDurations.length ? fmtDuration(sum(allDurations)) : '';
+    rows.push(physRow('Total seizure duration (mm:ss)', totalRowVals, grandTotal));
+    if (!anyDuration) {
+      // Quiet annotation so the reader knows the section is empty by design,
+      // not by bug — useful when every event in range was logged without a
+      // duration.
+      rows.push(['(no timed events in period)']);
+    }
+  }
+  rows.push([]); // blank
 
-  // Blank
-  rows.push([]);
+  /* ---------- Chunk 4: seizure types — median duration ---------- */
+  if (typesTable.types.length) {
+    for (const t of typesTable.types) {
+      // Per-bucket median, with "*" annotation if n<3 (matches in-app convention).
+      const perBucket = t.cells.map(c => {
+        if (!c.durations.length) return '';
+        if (c.durations.length === 1) return fmtDuration(c.durations[0]);
+        const m = medianOrDash(c.durations);
+        return c.durations.length < 3 ? `${fmtDuration(m)}*` : fmtDuration(m);
+      });
+      // Per-type Total = grand median across the range
+      let typeTotal = '';
+      if (t.totalDurations.length) {
+        if (t.totalDurations.length === 1) {
+          typeTotal = fmtDuration(t.totalDurations[0]);
+        } else {
+          const m = medianOrDash(t.totalDurations);
+          typeTotal = t.totalDurations.length < 3 ? `${fmtDuration(m)}*` : fmtDuration(m);
+        }
+      }
+      rows.push(physRow(t.label, perBucket, typeTotal));
+    }
+    // Cross-type Median seizure duration row
+    const medianRowVals = buckets.map((_, i) => {
+      const all = [].concat(...typesTable.types.map(t => t.cells[i].durations));
+      if (!all.length) return '';
+      if (all.length === 1) return fmtDuration(all[0]);
+      const m = medianOrDash(all);
+      return all.length < 3 ? `${fmtDuration(m)}*` : fmtDuration(m);
+    });
+    let grandMedian = '';
+    if (allDurations.length) {
+      if (allDurations.length === 1) {
+        grandMedian = fmtDuration(allDurations[0]);
+      } else {
+        const m = medianOrDash(allDurations);
+        grandMedian = allDurations.length < 3 ? `${fmtDuration(m)}*` : fmtDuration(m);
+      }
+    }
+    rows.push(physRow('Median seizure duration (mm:ss)', medianRowVals, grandMedian));
+  }
+  rows.push([]); // blank
+
+  /* ---------- Outcome block ---------- */
+  rows.push(physRow('Seizure-free days', cells.map(c => c.seizureFreeDays), sum(cells.map(c => c.seizureFreeDays))));
+  rows.push(physRow('Rescue med uses',   cells.map(c => c.rescueUses || ''), sum(cells.map(c => c.rescueUses))));
+  rows.push([]); // blank
 
   // Notes block — empty rows for the clinician to annotate in Excel.
   rows.push(['Notes']);

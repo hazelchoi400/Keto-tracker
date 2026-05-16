@@ -51,9 +51,10 @@ async function exportXLSX(fromMs, toMs) {
 
   // Tab order is deliberate: ReadMe first so anyone receiving the file
   // cold knows what they're looking at; then Summary (highest level);
-  // then Daily (day-by-day overview); then the long-format tabs that
-  // most cross-sheet analysis joins on; then Patterns data (v1.3) for
-  // any clinician wanting the in-app Patterns views as cells.
+  // then Monthly (v1.5: the parent's-spreadsheet view — types as rows,
+  // months as columns); then Daily (day-by-day); then the long-format
+  // tabs that most cross-sheet analysis joins on; then Patterns data
+  // (v1.3) for any clinician wanting the in-app Patterns views as cells.
 
   // ---------- Tab 1: ReadMe (v1.3) ----------
   const readMeSheet = buildReadMeSheet(settings, fromMs, toMs, measurements.length, seizures.length);
@@ -63,26 +64,30 @@ async function exportXLSX(fromMs, toMs) {
   const summarySheet = buildSummarySheet(settings, measurements, seizures, fromMs, toMs);
   XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
 
-  // ---------- Tab 3: Daily ----------
+  // ---------- Tab 3: Monthly (v1.5) ----------
+  // Types-as-rows / months-as-columns view, modelled on the spreadsheets
+  // dietitians and neurologists already keep manually at clinic. The bucket
+  // type auto-adapts to the export range (daily / weekly / calendar-monthly).
+  const periodicSheet = buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs);
+  XLSX.utils.book_append_sheet(wb, periodicSheet, 'Monthly');
+
+  // ---------- Tab 4: Daily ----------
   const dailySheet = buildDailySheet(settings, measurements, seizures, fromMs, toMs);
   XLSX.utils.book_append_sheet(wb, dailySheet, 'Daily');
 
-  // ---------- Tab 4: Measurements ----------
+  // ---------- Tab 5: Measurements ----------
   const measSheet = buildMeasurementsSheet(measurements, settings);
   XLSX.utils.book_append_sheet(wb, measSheet, 'Measurements');
 
-  // ---------- Tab 5: Seizures ----------
+  // ---------- Tab 6: Seizures ----------
   const seizSheet = buildSeizuresSheet(seizures, measurements, settings);
   XLSX.utils.book_append_sheet(wb, seizSheet, 'Seizures');
 
-  // ---------- Tab 6: Daily detail (v1.3) ----------
-  // Long-format interleave of every measurement and seizure, one row each,
-  // with a record_type column. Useful for pivot tables and exploratory
-  // analysis without forcing anyone to merge the long tabs themselves.
+  // ---------- Tab 7: Daily detail (v1.3) ----------
   const detailSheet = buildDailyDetailSheet(measurements, seizures, settings);
   XLSX.utils.book_append_sheet(wb, detailSheet, 'Daily detail');
 
-  // ---------- Tab 7: Patterns data (v1.3) ----------
+  // ---------- Tab 8: Patterns data (v1.3) ----------
   // Mirrors the in-app Patterns screen as plain cells — no images.
   // Includes AM/PM stats, type counts, per-type weekly counts and
   // median durations, hour-of-day histogram, day-of-week histogram,
@@ -134,7 +139,7 @@ function buildSummarySheet(settings, measurements, seizures, fromMs, toMs) {
     ['KetoCare summary', ''],
     ['', ''],
     ['Child', settings.childName || '—'],
-    ['Date of birth', settings.dob || '—'],
+    ['Started ketogenic diet', settings.kdStartDate ? fmtDateUK(new Date(settings.kdStartDate + 'T00:00:00').getTime()) : '—'],
     ['Diet variant', formatVariant(settings.variant, settings)],
     ['Period', `${fmtDateUK(fromMs)} to ${fmtDateUK(toMs)}`],
     ['Days in period', totalDays],
@@ -179,6 +184,179 @@ function buildSummarySheet(settings, measurements, seizures, fromMs, toMs) {
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = [{ wch: 32 }, { wch: 50 }];
   // Bold for section headers (rows 0, 9, 16, 23, 30 — but XLSX cell formatting with SheetJS community is limited)
+  return ws;
+}
+
+/**
+ * v1.5 — Monthly tab. The parent's-spreadsheet view that clinicians find
+ * easiest to read: seizure types as rows, time buckets as columns, totals
+ * on the right. Below the type rows, summary rows for ketone (AM/PM mean),
+ * glucose mean, GKI mean, readings count, seizure-free days, median
+ * duration, and rescue-med uses. Then a blank notes block for the
+ * clinician to annotate inline.
+ *
+ * Bucket choice follows the v1.5 auto-rule:
+ *   ≤7 days   → daily
+ *   8–60 days → calendar weekly (Mon–Sun)
+ *   >60 days  → calendar monthly (Jan, Feb, Mar…)
+ *
+ * The first and/or last buckets may be partial (e.g. "Apr 23 (from 14)").
+ * This matches what the in-app Patterns table shows.
+ */
+function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
+  const rangeDays = Math.max(1, Math.ceil((toMs - fromMs) / 86400000));
+  const { bucket, label: bucketLabel } = KCCharts.autoBucketForDays(rangeDays);
+
+  // Reuse the same type×bucket builder as the in-app Patterns and the PDF.
+  const typesTable = KCCharts.seizureTypesByPeriodTable(seizures, settings, fromMs, toMs, bucket);
+  const buckets = typesTable.buckets;
+  const bucketLabels = buckets.map(b => b.label);
+
+  // Per-bucket helpers — share one pass over events
+  const bucketIndex = (ts) => {
+    for (let i = 0; i < buckets.length; i++) {
+      if (ts >= buckets[i].start && ts <= buckets[i].end) return i;
+    }
+    return -1;
+  };
+
+  // Per-bucket means + counts
+  const cells = buckets.map(() => ({
+    ketoneAM: [], ketonePM: [], glucose: [], gki: [],
+    readings: 0, seizureFreeDays: 0, rescueUses: 0, durations: []
+  }));
+  // Track unique seizure-days per bucket
+  const seizureDaysByBucket = buckets.map(() => new Set());
+
+  const morningEnd = KCCharts.MORNING_END_HOUR;
+
+  for (const m of measurements) {
+    const i = bucketIndex(m.timestamp);
+    if (i < 0) continue;
+    cells[i].readings++;
+    const hour = new Date(m.timestamp).getHours();
+    if (m.bloodKetone != null && !isNaN(m.bloodKetone)) {
+      if (hour < morningEnd) cells[i].ketoneAM.push(m.bloodKetone);
+      else cells[i].ketonePM.push(m.bloodKetone);
+    }
+    if (m.glucose != null && !isNaN(m.glucose)) cells[i].glucose.push(m.glucose);
+    if (m.bloodKetone && m.glucose && m.bloodKetone > 0) cells[i].gki.push(m.glucose / m.bloodKetone);
+  }
+
+  for (const s of seizures) {
+    const i = bucketIndex(s.startTime);
+    if (i < 0) continue;
+    if (s.durationSec != null && !isNaN(s.durationSec)) cells[i].durations.push(s.durationSec);
+    if (s.rescueMed && s.rescueMed.trim()) cells[i].rescueUses++;
+    const dayKey = new Date(s.startTime).toDateString();
+    seizureDaysByBucket[i].add(dayKey);
+  }
+
+  // Compute seizure-free days per bucket = days in bucket − unique seizure days
+  for (let i = 0; i < buckets.length; i++) {
+    const totalDays = Math.max(1, Math.ceil((buckets[i].end - buckets[i].start + 1) / 86400000));
+    cells[i].seizureFreeDays = totalDays - seizureDaysByBucket[i].size;
+  }
+
+  const meanOrDash = (arr) => arr.length ? round2(arr.reduce((a, b) => a + b, 0) / arr.length) : '';
+  const medianOrDash = (arr) => {
+    if (!arr.length) return '';
+    const s = arr.slice().sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : round2((s[mid-1] + s[mid]) / 2);
+  };
+  const fmtDuration = (secs) => {
+    if (secs === '' || secs == null) return '';
+    const r = Math.round(secs);
+    const m = Math.floor(r / 60);
+    const rs = r % 60;
+    return `${m}:${String(rs).padStart(2, '0')}`;
+  };
+  const sum = (arr) => arr.reduce((a, b) => a + b, 0);
+
+  // Header rows
+  const rows = [];
+  rows.push([`Monthly summary · ${bucketLabel}`]);
+  rows.push([
+    settings.kdStartDate
+      ? `Started keto ${new Date(settings.kdStartDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`
+      : ''
+  ]);
+  rows.push([]); // blank
+  rows.push(['', ...bucketLabels, 'Total']);
+
+  // Seizure types — one row per type, then a totals row
+  if (typesTable.types.length) {
+    for (const t of typesTable.types) {
+      const row = [t.label];
+      for (const c of t.cells) {
+        row.push(c.count > 0 ? c.count : '');
+      }
+      row.push(t.totalCount);
+      rows.push(row);
+    }
+    // "All seizures" total per bucket
+    const allRow = ['All seizures'];
+    for (let i = 0; i < buckets.length; i++) {
+      const v = typesTable.types.reduce((a, t) => a + (t.cells[i] ? t.cells[i].count : 0), 0);
+      allRow.push(v > 0 ? v : '');
+    }
+    allRow.push(typesTable.types.reduce((a, t) => a + t.totalCount, 0));
+    rows.push(allRow);
+  } else {
+    rows.push(['(no seizures logged in this period)']);
+  }
+
+  // Blank row
+  rows.push([]);
+
+  // Physiology + treatment summary rows
+  const physRow = (label, valuesPerBucket, totalValue) => {
+    const r = [label];
+    for (const v of valuesPerBucket) r.push(v === '' || v == null ? '' : v);
+    r.push(totalValue);
+    return r;
+  };
+
+  // Compute totals row-by-row from the underlying raw arrays so the Total
+  // column is the true grand stat rather than a mean-of-means.
+  const allKetoneAM = [].concat(...cells.map(c => c.ketoneAM));
+  const allKetonePM = [].concat(...cells.map(c => c.ketonePM));
+  const allGlucose  = [].concat(...cells.map(c => c.glucose));
+  const allGKI      = [].concat(...cells.map(c => c.gki));
+  const allDurations = [].concat(...cells.map(c => c.durations));
+
+  rows.push(physRow('Mean blood ketone — AM (mmol/L)', cells.map(c => meanOrDash(c.ketoneAM)), meanOrDash(allKetoneAM)));
+  rows.push(physRow('Mean blood ketone — PM (mmol/L)', cells.map(c => meanOrDash(c.ketonePM)), meanOrDash(allKetonePM)));
+  rows.push(physRow('Mean glucose (mmol/L)',           cells.map(c => meanOrDash(c.glucose)),  meanOrDash(allGlucose)));
+  rows.push(physRow('Mean GKI',                        cells.map(c => meanOrDash(c.gki)),      meanOrDash(allGKI)));
+  rows.push(physRow('Readings logged',                 cells.map(c => c.readings || ''),       sum(cells.map(c => c.readings))));
+
+  // Blank row
+  rows.push([]);
+
+  // Treatment / outcome rows
+  rows.push(physRow('Seizure-free days',               cells.map(c => c.seizureFreeDays),      sum(cells.map(c => c.seizureFreeDays))));
+  rows.push(physRow('Median seizure duration (mm:ss)', cells.map(c => fmtDuration(medianOrDash(c.durations))), fmtDuration(medianOrDash(allDurations))));
+  rows.push(physRow('Rescue med uses',                 cells.map(c => c.rescueUses || ''),     sum(cells.map(c => c.rescueUses))));
+
+  // Blank
+  rows.push([]);
+
+  // Notes block — empty rows for the clinician to annotate in Excel.
+  rows.push(['Notes']);
+  for (let i = 0; i < 6; i++) rows.push(['']);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  // Column widths — label column wider, then per-bucket, then Total.
+  // Bucket columns get a little extra for partial-month labels like
+  // "Apr 23 (from 14)" which are longer than "Apr 23".
+  const cols = [{ wch: 36 }];
+  for (const b of buckets) cols.push({ wch: Math.max(11, b.label.length + 2) });
+  cols.push({ wch: 10 });
+  ws['!cols'] = cols;
+  // Freeze the header column + the first four rows (title + KD line + blank + header)
+  ws['!freeze'] = { xSplit: 1, ySplit: 4 };
   return ws;
 }
 
@@ -271,39 +449,56 @@ function buildDailySheet(settings, measurements, seizures, fromMs, toMs) {
 }
 
 function buildMeasurementsSheet(measurements, settings) {
-  // v1.3: ISO date column up front so this tab joins cleanly to Daily /
-  // Seizures / Patterns data on a single comparable key. The UK-formatted
-  // date stays for human readability.
-  const headers = [
-    'Date', 'Date (UK)', 'Time', 'Method', 'Ketone (mmol/L)', 'Urine ketone', 'Glucose (mmol/L)', 'GKI', 'In target?', 'Notes'
-  ];
+  // v1.5 — Urine ketone is no longer an input. For data captured under v1.4
+  // or earlier the schema still has urineKetone values, so we keep the Urine
+  // column conditionally — visible only when at least one record has a urine
+  // reading. New exports under v1.5 will simply not have those columns.
+  const anyUrine = measurements.some(m => m.urineKetone != null);
+
+  const headers = anyUrine
+    ? ['Date', 'Date (UK)', 'Time', 'Method', 'Ketone (mmol/L)', 'Urine ketone', 'Glucose (mmol/L)', 'GKI', 'In target?', 'Notes']
+    : ['Date', 'Date (UK)', 'Time', 'Ketone (mmol/L)', 'Glucose (mmol/L)', 'GKI', 'In target?', 'Notes'];
   const rows = [headers];
   for (const m of measurements) {
     const d = new Date(m.timestamp);
-    const method = m.bloodKetone != null ? 'Blood' : (m.urineKetone != null ? 'Urine' : '');
     const gki = (m.bloodKetone && m.glucose && m.bloodKetone > 0) ? round2(m.glucose / m.bloodKetone) : '';
     const inT = (m.bloodKetone != null && settings.ketoneMin != null && settings.ketoneMax != null)
       ? (m.bloodKetone >= settings.ketoneMin && m.bloodKetone <= settings.ketoneMax ? 'Yes' : 'No')
       : '';
-    rows.push([
-      fmtDateISO(m.timestamp),
-      fmtDateUK(m.timestamp),
-      fmtTime24(d),
-      method,
-      m.bloodKetone != null ? m.bloodKetone : '',
-      m.urineKetone != null ? urineLabel(m.urineKetone) : '',
-      m.glucose != null ? m.glucose : '',
-      gki,
-      inT,
-      m.notes || ''
-    ]);
+    if (anyUrine) {
+      const method = m.bloodKetone != null ? 'Blood' : (m.urineKetone != null ? 'Urine' : '');
+      rows.push([
+        fmtDateISO(m.timestamp),
+        fmtDateUK(m.timestamp),
+        fmtTime24(d),
+        method,
+        m.bloodKetone != null ? m.bloodKetone : '',
+        m.urineKetone != null ? urineLabel(m.urineKetone) : '',
+        m.glucose != null ? m.glucose : '',
+        gki,
+        inT,
+        m.notes || ''
+      ]);
+    } else {
+      rows.push([
+        fmtDateISO(m.timestamp),
+        fmtDateUK(m.timestamp),
+        fmtTime24(d),
+        m.bloodKetone != null ? m.bloodKetone : '',
+        m.glucose != null ? m.glucose : '',
+        gki,
+        inT,
+        m.notes || ''
+      ]);
+    }
   }
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [
-    { wch: 11 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 7 }, { wch: 11 }, { wch: 36 }
-  ];
+  ws['!cols'] = anyUrine
+    ? [{ wch: 11 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 7 }, { wch: 11 }, { wch: 36 }]
+    : [{ wch: 11 }, { wch: 12 }, { wch: 8 }, { wch: 16 }, { wch: 18 }, { wch: 7 }, { wch: 11 }, { wch: 36 }];
   ws['!freeze'] = { xSplit: 0, ySplit: 1 };
-  ws['!autofilter'] = { ref: `A1:J${rows.length}` };
+  const lastCol = anyUrine ? 'J' : 'H';
+  ws['!autofilter'] = { ref: `A1:${lastCol}${rows.length}` };
   return ws;
 }
 
@@ -367,7 +562,10 @@ function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
     ['Tabs'],
     ['  ReadMe        — this page.'],
     ['  Summary       — overview of the period at a glance.'],
-    ['  Daily         — one row per day. Best place to spot patterns.'],
+    ['  Monthly       — types as rows, time periods (e.g. months) as columns,'],
+    ['                  totals on the right. The view clinicians find easiest'],
+    ['                  to read for "what changed across the year".'],
+    ['  Daily         — one row per day. Best place to spot day-to-day variation.'],
     ['  Measurements  — every ketone/glucose reading recorded (long format).'],
     ['  Seizures      — every seizure recorded, with the closest ketone'],
     ['                  reading before and after each event.'],
@@ -376,8 +574,8 @@ function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
     ['                  record_type column. Useful for pivot tables.'],
     ['  Patterns data — the same views shown on the in-app Patterns screen,'],
     ['                  as plain cells. AM/PM stats, type counts, per-type'],
-    ['                  weekly counts and median durations, hour-of-day'],
-    ['                  histogram, day-of-week histogram, triggers tally.'],
+    ['                  counts and median durations, hour-of-day histogram,'],
+    ['                  day-of-week histogram, triggers tally.'],
     [''],
     ['How the tabs link'],
     ['  Every event/measurement/daily row has a "Date" column in ISO'],
@@ -391,20 +589,10 @@ function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
     ['  Glucose  mmol/L'],
     ['  GKI      Glucose ÷ Ketone (both in mmol/L)'],
     [''],
-    ['Urine ketone scale'],
-    ['  Strips give a colour-band reading. The Measurements tab shows the'],
-    ['  band name. For reference these correspond approximately to:'],
-    ['  Negative          0 mmol/L'],
-    ['  Trace             ~0.5 mmol/L'],
-    ['  Small (+)         ~1.5 mmol/L'],
-    ['  Moderate (++)     ~4 mmol/L'],
-    ['  Large (+++)       ~8 mmol/L'],
-    ['  Very large (++++) ~16 mmol/L'],
-    [''],
     ['Notes on the data'],
-    ['  • All values are parent-reported. Ketone meters and urine strips'],
-    ['    have known measurement variability; treat extreme single values'],
-    ['    with appropriate caution.'],
+    ['  • All values are parent-reported. Ketone meters have known'],
+    ['    measurement variability; treat extreme single values with'],
+    ['    appropriate caution.'],
     ['  • GKI is only calculated when both blood ketone and glucose were'],
     ['    measured at the same time.'],
     ['  • The "Last ketone before" / "First ketone after" columns on the'],
@@ -413,18 +601,26 @@ function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
     ['    in time that reading was.'],
     ['  • The "In target" columns use the target range set by the family'],
     ['    in the app settings (typically agreed with their dietitian).'],
-    ['  • The Patterns data tab is descriptive only. No correlations are'],
-    ['    calculated. Buckets are auto-picked from the export range:'],
-    ['    weekly when the range is up to 21 days, monthly up to 120 days,'],
-    ['    quarterly beyond that.'],
+    ['  • Time-bucketed views (the Monthly and Patterns data tabs) auto-pick'],
+    ['    the bucket type from the export range length:'],
+    ['      ≤7 days   — daily'],
+    ['      8–60 days — calendar weeks (Mon–Sun)'],
+    ['      >60 days  — calendar months (e.g. Apr 23, May 23, …)'],
+    ['    The first and last buckets may be partial — for example, when'],
+    ['    the range starts mid-month, the first column is labelled with'],
+    ['    "(from N)" to make that visible.'],
+    ['  • Patterns data is descriptive only. No correlations are calculated.'],
     [''],
     ['Export details'],
     ['  Child name      ' + (settings.childName || '—')],
+    ['  Started keto    ' + (settings.kdStartDate
+                            ? new Date(settings.kdStartDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+                            : '—')],
     ['  Diet variant    ' + formatVariant(settings.variant, settings)],
     ['  Period          ' + fmtDateUK(fromMs) + ' to ' + fmtDateUK(toMs)],
     ['  Records         ' + nMeas + ' measurements, ' + nSeiz + ' seizures'],
     ['  Generated       ' + new Date().toLocaleString('en-GB')],
-    ['  App version     v1.4']
+    ['  App version     v1.5']
   ];
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = [{ wch: 78 }];
@@ -442,12 +638,20 @@ function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
  * see ketones around each seizure, sort by date+time and read in order.
  */
 function buildDailyDetailSheet(measurements, seizures, settings) {
-  const headers = [
-    'Date', 'Date (UK)', 'Time', 'Record type',
-    'Ketone (mmol/L)', 'Urine ketone', 'Glucose (mmol/L)', 'GKI', 'In target?',
-    'Seizure type', 'Duration (sec)', 'Triggers', 'Rescue medication', 'Recovery (min)',
-    'Notes'
-  ];
+  // v1.5 — Urine column shown only when at least one measurement has a
+  // urine value (legacy data from v1.4 or earlier). Match the conditional
+  // behaviour of buildMeasurementsSheet.
+  const anyUrine = measurements.some(m => m.urineKetone != null);
+
+  const headers = anyUrine
+    ? ['Date', 'Date (UK)', 'Time', 'Record type',
+       'Ketone (mmol/L)', 'Urine ketone', 'Glucose (mmol/L)', 'GKI', 'In target?',
+       'Seizure type', 'Duration (sec)', 'Triggers', 'Rescue medication', 'Recovery (min)',
+       'Notes']
+    : ['Date', 'Date (UK)', 'Time', 'Record type',
+       'Ketone (mmol/L)', 'Glucose (mmol/L)', 'GKI', 'In target?',
+       'Seizure type', 'Duration (sec)', 'Triggers', 'Rescue medication', 'Recovery (min)',
+       'Notes'];
   const rows = [headers];
 
   // Build a combined event list sorted by timestamp
@@ -464,46 +668,67 @@ function buildDailyDetailSheet(measurements, seizures, settings) {
       const inT = (m.bloodKetone != null && settings.ketoneMin != null && settings.ketoneMax != null)
         ? (m.bloodKetone >= settings.ketoneMin && m.bloodKetone <= settings.ketoneMax ? 'Yes' : 'No')
         : '';
-      rows.push([
-        fmtDateISO(ev.ts),
-        fmtDateUK(ev.ts),
-        fmtTime24(d),
-        'measurement',
-        m.bloodKetone != null ? m.bloodKetone : '',
-        m.urineKetone != null ? urineLabel(m.urineKetone) : '',
-        m.glucose != null ? m.glucose : '',
-        gki,
-        inT,
-        '', '', '', '', '',         // seizure-only columns blank
-        m.notes || ''
-      ]);
+      const measRow = anyUrine
+        ? [
+            fmtDateISO(ev.ts), fmtDateUK(ev.ts), fmtTime24(d), 'measurement',
+            m.bloodKetone != null ? m.bloodKetone : '',
+            m.urineKetone != null ? urineLabel(m.urineKetone) : '',
+            m.glucose != null ? m.glucose : '', gki, inT,
+            '', '', '', '', '',
+            m.notes || ''
+          ]
+        : [
+            fmtDateISO(ev.ts), fmtDateUK(ev.ts), fmtTime24(d), 'measurement',
+            m.bloodKetone != null ? m.bloodKetone : '',
+            m.glucose != null ? m.glucose : '', gki, inT,
+            '', '', '', '', '',
+            m.notes || ''
+          ];
+      rows.push(measRow);
     } else {
       const s = ev.data;
-      rows.push([
-        fmtDateISO(ev.ts),
-        fmtDateUK(ev.ts),
-        fmtTime24(d),
-        'seizure',
-        '', '', '', '', '',         // measurement-only columns blank
-        formatSeizureType(s, settings),
-        s.durationSec != null ? s.durationSec : '',
-        (s.triggers || []).map(t => t.replace('-', ' ')).join('; '),
-        s.rescueMed || '',
-        s.recoveryMin != null ? s.recoveryMin : '',
-        s.notes || ''
-      ]);
+      const seizRow = anyUrine
+        ? [
+            fmtDateISO(ev.ts), fmtDateUK(ev.ts), fmtTime24(d), 'seizure',
+            '', '', '', '', '',
+            formatSeizureType(s, settings),
+            s.durationSec != null ? s.durationSec : '',
+            (s.triggers || []).map(t => t.replace('-', ' ')).join('; '),
+            s.rescueMed || '',
+            s.recoveryMin != null ? s.recoveryMin : '',
+            s.notes || ''
+          ]
+        : [
+            fmtDateISO(ev.ts), fmtDateUK(ev.ts), fmtTime24(d), 'seizure',
+            '', '', '', '',
+            formatSeizureType(s, settings),
+            s.durationSec != null ? s.durationSec : '',
+            (s.triggers || []).map(t => t.replace('-', ' ')).join('; '),
+            s.rescueMed || '',
+            s.recoveryMin != null ? s.recoveryMin : '',
+            s.notes || ''
+          ];
+      rows.push(seizRow);
     }
   }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [
-    { wch: 11 }, { wch: 12 }, { wch: 8 }, { wch: 12 },
-    { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 7 }, { wch: 11 },
-    { wch: 18 }, { wch: 14 }, { wch: 28 }, { wch: 22 }, { wch: 13 },
-    { wch: 36 }
-  ];
+  ws['!cols'] = anyUrine
+    ? [
+        { wch: 11 }, { wch: 12 }, { wch: 8 }, { wch: 12 },
+        { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 7 }, { wch: 11 },
+        { wch: 18 }, { wch: 14 }, { wch: 28 }, { wch: 22 }, { wch: 13 },
+        { wch: 36 }
+      ]
+    : [
+        { wch: 11 }, { wch: 12 }, { wch: 8 }, { wch: 12 },
+        { wch: 16 }, { wch: 18 }, { wch: 7 }, { wch: 11 },
+        { wch: 18 }, { wch: 14 }, { wch: 28 }, { wch: 22 }, { wch: 13 },
+        { wch: 36 }
+      ];
   ws['!freeze'] = { xSplit: 0, ySplit: 1 };
-  ws['!autofilter'] = { ref: `A1:O${rows.length}` };
+  const lastCol = anyUrine ? 'O' : 'N';
+  ws['!autofilter'] = { ref: `A1:${lastCol}${rows.length}` };
   return ws;
 }
 
@@ -598,39 +823,39 @@ function buildPatternsSheet(settings, measurements, seizures, fromMs, toMs) {
   rows.push([]);
 
   /* ---------- 3 + 4. Per-type counts and median durations by bucket ---------- */
+  // v1.5 — switch to calendar-anchored buckets matching the in-app Patterns
+  // and the new Monthly tab. ≤7d daily / 8–60d weekly / >60d monthly.
   const rangeDays = Math.ceil((toMs - fromMs) / 86400000);
-  let bucket, bucketLabel;
-  if (rangeDays <= 21)       { bucket = 'week';      bucketLabel = 'Weekly buckets (7-day windows ending today)'; }
-  else if (rangeDays <= 120) { bucket = 'month';     bucketLabel = 'Monthly buckets (30-day windows ending today)'; }
-  else                       { bucket = 'quarter';   bucketLabel = 'Quarterly buckets (90-day windows ending today)'; }
+  const { bucket, label: bucketLabelShort } = KCCharts.autoBucketForDays(rangeDays);
+  const bucketLabel = bucket === 'day' ? 'Daily buckets'
+    : bucket === 'calendar-week' ? 'Calendar weeks (Mon–Sun; first/last may be partial)'
+    : 'Calendar months (Jan, Feb, …; first/last may be partial)';
 
-  const freq = KCCharts.seizureTypeFrequencyByType(seizures, settings, fromMs, toMs, bucket);
-  const dur  = KCCharts.seizureTypeDurationByType(seizures, settings, fromMs, toMs, bucket);
+  const typesTable = KCCharts.seizureTypesByPeriodTable(seizures, settings, fromMs, toMs, bucket);
 
   rows.push(['Per-type frequency over time']);
   rows.push([bucketLabel]);
-  if (!freq.length) {
+  if (!typesTable.types.length) {
     rows.push(['(no seizures in period)']);
   } else {
-    // Header: Type | bucket1 start | bucket2 start | ... | Total
-    const bucketLabels = freq[0].buckets.map(b => fmtDateISO(b.start));
+    const bucketLabels = typesTable.buckets.map(b => b.label);
     rows.push(['Type', ...bucketLabels, 'Total']);
-    for (const t of freq) {
-      rows.push([t.label, ...t.buckets.map(b => b.count), t.total]);
+    for (const t of typesTable.types) {
+      rows.push([t.label, ...t.cells.map(c => c.count), t.totalCount]);
     }
   }
   rows.push([]);
 
   rows.push(['Per-type median duration (seconds) over time']);
   rows.push(['Buckets where n<3, median is left blank (too few events for a meaningful average; see Seizures tab for individual durations).']);
-  if (!dur.length) {
+  if (!typesTable.types.length) {
     rows.push(['(no timed seizures in period)']);
   } else {
-    const bucketLabels = dur[0].buckets.map(b => fmtDateISO(b.start));
+    const bucketLabels = typesTable.buckets.map(b => b.label);
     rows.push(['Type', ...bucketLabels, 'Total timed events']);
-    for (const t of dur) {
-      const cells = t.buckets.map(b => (b.count >= 3 && b.median != null) ? Math.round(b.median) : '');
-      rows.push([t.label, ...cells, t.totalWithDuration]);
+    for (const t of typesTable.types) {
+      const cells = t.cells.map(c => (c.count >= 3 && c.median != null) ? Math.round(c.median) : '');
+      rows.push([t.label, ...cells, t.totalDurations.length]);
     }
   }
   rows.push([]);
@@ -788,9 +1013,13 @@ async function exportPDF(fromMs, toMs) {
   y += 5;
 
   doc.setFont('helvetica', 'bold');
-  doc.text('Date of birth', MARGIN, y);
+  doc.text('Started keto', MARGIN, y);
   doc.setFont('helvetica', 'normal');
-  doc.text(settings.dob || '—', MARGIN + 30, y);
+  doc.text(
+    settings.kdStartDate
+      ? new Date(settings.kdStartDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+      : '—',
+    MARGIN + 30, y);
   y += 5;
 
   doc.setFont('helvetica', 'bold');
@@ -802,7 +1031,16 @@ async function exportPDF(fromMs, toMs) {
   doc.setFont('helvetica', 'bold');
   doc.text('Period', MARGIN, y);
   doc.setFont('helvetica', 'normal');
-  doc.text(`${fmtDateISO(fromMs)} to ${fmtDateISO(toMs)}`, MARGIN + 30, y);
+  // v1.5 — Annotate "since KD started" when the From date aligns with the
+  // KD start date (within a day). This is the common case for clinic prep.
+  let periodLine = `${fmtDateISO(fromMs)} to ${fmtDateISO(toMs)}`;
+  if (settings.kdStartDate) {
+    const kdStartMs = new Date(settings.kdStartDate + 'T00:00:00').getTime();
+    if (!isNaN(kdStartMs) && Math.abs(fromMs - kdStartMs) < 86400000) {
+      periodLine += '  (since KD started)';
+    }
+  }
+  doc.text(periodLine, MARGIN + 30, y);
   y += 8;
 
   // Stats section
@@ -852,24 +1090,29 @@ async function exportPDF(fromMs, toMs) {
   // Charts — render fresh to off-screen canvases so this works regardless of
   // which screen the user is on. The PDF uses combined-mode (single line per
   // chart, all readings on a day averaged) to match the default in-app view.
-  const ketoneSeries  = KCCharts.dailySeries(measurements, 'bloodKetone', fromMs, toMs);
-  const glucoseSeries = KCCharts.dailySeries(measurements, 'glucose', fromMs, toMs);
-  const gkiSeries     = KCCharts.dailySeries(
+  // v1.5 — Charts use the same auto-bucketing as the in-app Trends screen so
+  // long ranges (e.g. "Since KD started" over a full year) become 12 monthly
+  // points instead of 365 daily points. Bucket choice is computed once and
+  // reused for the Patterns charts further down.
+  const pdfMainRangeDays = Math.ceil((toMs - fromMs) / 86400000);
+  const { bucket: pdfMainBucket, label: pdfMainBucketLabel } = KCCharts.autoBucketForDays(pdfMainRangeDays);
+  const ketoneSeries  = KCCharts.bucketedSeries(measurements, 'bloodKetone', fromMs, toMs, pdfMainBucket);
+  const glucoseSeries = KCCharts.bucketedSeries(measurements, 'glucose', fromMs, toMs, pdfMainBucket);
+  const gkiSeries     = KCCharts.bucketedSeries(
     measurements,
     (r) => (r.bloodKetone && r.glucose && r.bloodKetone > 0 ? r.glucose / r.bloodKetone : null),
-    fromMs, toMs
+    fromMs, toMs, pdfMainBucket
   );
-  const seizureSeries = KCCharts.dailyCounts(seizures, fromMs, toMs);
-  const seizureMarkers = KCCharts.seizureDayMarkers(seizures, fromMs, toMs);
+  const seizureSeries = KCCharts.bucketedCounts(seizures, fromMs, toMs, pdfMainBucket);
   const hourSeries = KCCharts.seizuresByHour(seizures);
 
-  y = await renderOffscreenCombinedLineChartToPDF(doc, 'Ketone trend (mmol/L)', y, MARGIN, PAGE_W,
+  y = await renderOffscreenCombinedLineChartToPDF(doc, `Ketone trend (mmol/L) · ${pdfMainBucketLabel}`, y, MARGIN, PAGE_W,
     ketoneSeries, KCCharts.COLORS.sageDeep,
     (settings.ketoneMin && settings.ketoneMax) ? { min: settings.ketoneMin, max: settings.ketoneMax } : null,
     null);
-  y = await renderOffscreenCombinedLineChartToPDF(doc, 'Glucose trend (mmol/L)', y, MARGIN, PAGE_W,
+  y = await renderOffscreenCombinedLineChartToPDF(doc, `Glucose trend (mmol/L) · ${pdfMainBucketLabel}`, y, MARGIN, PAGE_W,
     glucoseSeries, KCCharts.COLORS.honey, null, null);
-  y = await renderOffscreenCombinedLineChartToPDF(doc, 'GKI trend', y, MARGIN, PAGE_W,
+  y = await renderOffscreenCombinedLineChartToPDF(doc, `GKI trend · ${pdfMainBucketLabel}`, y, MARGIN, PAGE_W,
     gkiSeries, KCCharts.COLORS.terra,
     (settings.gkiMin != null && settings.gkiMax != null) ? { min: settings.gkiMin, max: settings.gkiMax } : null,
     null);
@@ -899,31 +1142,26 @@ async function exportPDF(fromMs, toMs) {
   doc.setTextColor(45, 42, 38);
   y = renderPatternsStatsTable(doc, MARGIN, y, PAGE_W, measurements, seizures, fromMs, toMs);
 
-  // v1.3 — Seizures by type list (compact panel under AM/PM stats)
-  y = renderPatternsTypeCountList(doc, MARGIN, y, PAGE_W, seizures, settings);
-
-  // AM/PM ketone chart with seizure markers
-  const ketoneSplit = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
-  y = await renderOffscreenSplitLineChartToPDF(doc, 'Ketone trend — AM vs PM (mmol/L)', y, MARGIN, PAGE_W,
+  // AM/PM ketone chart with seizure markers — uses v1.5 bucketing so the
+  // x-axis matches the type tables below (monthly for >60d, weekly otherwise).
+  const rangeDays = Math.ceil((toMs - fromMs) / 86400000);
+  const { bucket: pdfBucket, label: pdfBucketLabel } = KCCharts.autoBucketForDays(rangeDays);
+  const ketoneSplit = KCCharts.bucketedMorningEveningSeries(measurements, 'bloodKetone', fromMs, toMs, pdfBucket);
+  const bucketedMarkers = KCCharts.seizureBucketMarkers(seizures, fromMs, toMs, pdfBucket);
+  y = await renderOffscreenSplitLineChartToPDF(doc, `Ketone trend — AM vs PM (mmol/L) · ${pdfBucketLabel}`, y, MARGIN, PAGE_W,
     ketoneSplit, KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep,
     (settings.ketoneMin && settings.ketoneMax) ? { min: settings.ketoneMin, max: settings.ketoneMax } : null,
-    seizureMarkers);
+    bucketedMarkers);
 
-  // v1.3 — Seizure types over time (small-multiples frequency + duration)
-  // Range here covers the full export window. We pick weekly buckets when the
-  // window is <=30 days, monthly otherwise — matches the in-app behaviour.
-  const rangeDays = Math.ceil((toMs - fromMs) / 86400000);
+  // v1.5 — Seizure types over time as TABLES (replaces v1.3 small-multiples).
+  // Type rows × bucket columns + Total column. Uses the same auto-bucketing
+  // as the rest of the screen so PDF readers see the same data shape they
+  // saw in the app.
   if (rangeDays >= 14) {
-    const bucket = rangeDays <= 30 ? 'week' : 'month';
-    const freqData = KCCharts.seizureTypeFrequencyByType(seizures, settings, fromMs, toMs, bucket);
-    if (freqData.length) {
-      y = await renderSeizureTypesGridToPDF(doc, 'Seizure types — frequency over time', y, MARGIN, PAGE_W,
-        freqData, 'frequency');
-    }
-    const durData = KCCharts.seizureTypeDurationByType(seizures, settings, fromMs, toMs, bucket);
-    if (durData.length) {
-      y = await renderSeizureTypesGridToPDF(doc, 'Seizure types — duration over time (median; dots = <3 events)', y, MARGIN, PAGE_W,
-        durData, 'duration');
+    const tableData = KCCharts.seizureTypesByPeriodTable(seizures, settings, fromMs, toMs, pdfBucket);
+    if (tableData.types.length) {
+      y = renderSeizureTypesFrequencyTableToPDF(doc, `Seizure types — frequency · ${pdfBucketLabel}`, y, MARGIN, PAGE_W, tableData);
+      y = renderSeizureTypesDurationTableToPDF(doc, `Seizure types — median duration · ${pdfBucketLabel} (mm:ss; * = fewer than 3 events)`, y, MARGIN, PAGE_W, tableData);
     }
   }
 
@@ -1391,210 +1629,219 @@ function renderPatternsStatsTable(doc, margin, y, pageW, measurements, seizures,
 }
 
 /**
- * v1.3 — Compact "Seizures by type" list. Sits in the Patterns section just
- * below the AM/PM stats table. One row per type, count right-aligned.
- * Returns the updated y. Returns y unchanged if no seizures in range.
+ * v1.5 — Seizure types frequency table for PDF. Type rows × bucket columns
+ * + Total column, matching the in-app view and the parent's-spreadsheet
+ * layout. Drawn directly with jsPDF (no Chart.js) — tables are easier in
+ * raw jsPDF than an off-screen canvas, and they read more honestly at
+ * small numbers.
+ *
+ * `tableData` is the output of KCCharts.seizureTypesByPeriodTable.
+ *
+ * Page-break handling: if the table won't fit on the current page, we
+ * start a fresh page. If the column count is so large that the table is
+ * wider than the page, the columns auto-shrink in font size; if even at
+ * 6pt they don't fit, we fall back to splitting the columns across
+ * multiple stacked tables (rare — only happens for 2y+ exports).
  */
-function renderPatternsTypeCountList(doc, margin, y, pageW, seizures, settings) {
-  if (!seizures || !seizures.length) return y;
-  const counts = KCCharts.seizureTypeCounts(seizures, settings);
-  if (!counts.length) return y;
-
-  // Page-break safety
-  const lineH = 5;
-  const needed = 8 + counts.length * lineH + 4;
-  if (y + needed > 280) { doc.addPage(); y = margin; }
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(45, 42, 38);
-  doc.text('Seizures by type', margin, y);
-  y += 5;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  const rightX = margin + (pageW - margin * 2);
-  const total = counts.reduce((a, c) => a + c.count, 0);
-
-  for (const c of counts) {
-    doc.text(c.label, margin, y);
-    doc.text(String(c.count), rightX, y, { align: 'right' });
-    y += lineH;
-  }
-
-  // Total separator
-  doc.setDrawColor(227, 216, 197);
-  doc.setLineWidth(0.2);
-  doc.line(margin, y - 2.5, rightX, y - 2.5);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Total events', margin, y);
-  doc.text(String(total), rightX, y, { align: 'right' });
-  y += 6;
-
-  return y;
+function renderSeizureTypesFrequencyTableToPDF(doc, title, y, margin, pageW, tableData) {
+  if (!tableData || !tableData.types.length) return y;
+  const totalsRow = {
+    label: 'All types',
+    cells: tableData.buckets.map((_, i) =>
+      tableData.types.reduce((a, t) => a + (t.cells[i] ? t.cells[i].count : 0), 0)
+    ),
+    total: tableData.types.reduce((a, t) => a + t.totalCount, 0),
+    isTotals: true
+  };
+  const rows = tableData.types.map(t => ({
+    label: t.label,
+    cells: t.cells.map(c => (c.count === 0 ? '—' : String(c.count))),
+    total: String(t.totalCount),
+    bold: false
+  }));
+  rows.push({
+    label: totalsRow.label,
+    cells: totalsRow.cells.map(v => (v === 0 ? '—' : String(v))),
+    total: String(totalsRow.total),
+    bold: true,
+    isTotals: true
+  });
+  return _renderTypesTableToPDF(doc, title, y, margin, pageW, tableData.buckets, rows);
 }
 
 /**
- * v1.3 — Render a small-multiples grid of one mini-chart per seizure type
- * to the PDF. Used for both Frequency and Duration views.
- *
- * `typesData` is the array returned by seizureTypeFrequencyByType /
- * seizureTypeDurationByType.
- * `mode` is 'frequency' or 'duration'.
+ * v1.5 — Seizure types duration table for PDF. Same column shape as the
+ * frequency table; cell values are median seconds formatted as mm:ss. A
+ * trailing "*" marker means "fewer than 3 events — too few for a median",
+ * matching the in-app dot-mode convention.
  */
-async function renderSeizureTypesGridToPDF(doc, title, y, margin, pageW, typesData, mode) {
-  if (!typesData || !typesData.length) return y;
+function renderSeizureTypesDurationTableToPDF(doc, title, y, margin, pageW, tableData) {
+  if (!tableData || !tableData.types.length) return y;
+  const fmt = KCCharts.fmtDurationMmSs;
+  const rows = tableData.types.map(t => {
+    const cells = t.cells.map(c => {
+      if (c.count === 0) return '—';
+      if (c.count < 3) {
+        const first = c.durations.length ? fmt(c.durations[0]) : '—';
+        return `${first}*`;
+      }
+      return fmt(c.median);
+    });
+    // "Total" cell for duration row = overall median across the range
+    let totalStr;
+    if (!t.totalDurations.length) {
+      totalStr = '—';
+    } else if (t.totalDurations.length < 3) {
+      totalStr = `${fmt(t.totalDurations[0])}*`;
+    } else {
+      const sorted = t.totalDurations.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      const med = sorted.length % 2 ? sorted[mid] : (sorted[mid-1] + sorted[mid]) / 2;
+      totalStr = fmt(med);
+    }
+    return { label: t.label, cells, total: totalStr, bold: false };
+  });
+  return _renderTypesTableToPDF(doc, title, y, margin, pageW, tableData.buckets, rows);
+}
 
-  const cols = 2;
-  const gap = 4;
-  const innerW = pageW - margin * 2;
-  const cellW = (innerW - gap * (cols - 1)) / cols;
-  const cellH = 38;
-  const canvasInsetY = 7;
-  const canvasH = cellH - canvasInsetY - 2;
-  const titleH = 7;
+/**
+ * Shared low-level table renderer used by both frequency and duration tables.
+ * Auto-shrinks font size and column widths to fit the page width. Partial
+ * buckets (e.g. the first month if KD started mid-month) get a subtle
+ * terracotta-tinted background to flag the partial nature.
+ */
+function _renderTypesTableToPDF(doc, title, y, margin, pageW, buckets, rows) {
+  const usableW = pageW - margin * 2;
 
-  if (y + titleH + cellH + 6 > 280) { doc.addPage(); y = margin; }
+  // Page-break check — if the title + a header + one row won't fit, new page.
+  const minNeeded = 6 + 6 + 5;
+  if (y + minNeeded > 280) { doc.addPage(); y = margin; }
+
+  // Title
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(45, 42, 38);
-  doc.text(title, margin, y);
-  y += titleH;
+  const titleLines = doc.splitTextToSize(title, usableW);
+  doc.text(titleLines, margin, y);
+  y += titleLines.length * 5 + 1;
 
-  for (let i = 0; i < typesData.length; i += cols) {
-    if (y + cellH > 280) { doc.addPage(); y = margin; }
+  // Column widths — type-name column is fixed-ish, the rest share the remainder
+  // including a Total column at the end. Total column gets slightly extra.
+  const nCols = buckets.length + 2; // label + buckets + total
+  // Type-label column: wider for the in-app table, but in print we need to
+  // trim aggressively if there are many buckets. Cap at 32mm, floor at 18mm.
+  let labelW = Math.max(18, Math.min(32, usableW * 0.20));
+  let totalW = 12;
+  let remW = usableW - labelW - totalW;
+  let cellW = remW / buckets.length;
 
-    for (let c = 0; c < cols; c++) {
-      const idx = i + c;
-      if (idx >= typesData.length) break;
-      const t = typesData[idx];
-      const cellX = margin + c * (cellW + gap);
-
-      // Per-cell header line — type label + total
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(45, 42, 38);
-      const labelMax = cellW - 22;
-      let label = t.label;
-      if (doc.getTextWidth(label) > labelMax) {
-        while (label.length > 1 && doc.getTextWidth(label + '…') > labelMax) {
-          label = label.slice(0, -1);
-        }
-        label = label + '…';
-      }
-      doc.text(label, cellX, y + 3);
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      doc.setTextColor(138, 130, 120);
-      const subN = mode === 'duration' ? t.totalWithDuration : t.total;
-      const subLabel = mode === 'duration' ? `n=${subN} timed` : `n=${subN}`;
-      doc.text(subLabel, cellX + cellW, y + 3, { align: 'right' });
-
-      const dataUrl = await _renderTypeMiniToPNG(t.buckets, KCCharts.COLORS.terraDeep, mode);
-      if (dataUrl) {
-        doc.addImage(dataUrl, 'PNG', cellX, y + canvasInsetY, cellW, canvasH);
-      } else {
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(8);
-        doc.setTextColor(138, 130, 120);
-        doc.text('(Chart not available)', cellX, y + canvasInsetY + 5);
-      }
-    }
-
-    y += cellH + 2;
+  // If cells are too narrow, shrink the label column some more.
+  let fontSize = 9;
+  if (cellW < 10) {
+    labelW = 18;
+    totalW = 11;
+    cellW = (usableW - labelW - totalW) / buckets.length;
+    fontSize = 8;
   }
+  if (cellW < 8) {
+    fontSize = 7;
+  }
+  if (cellW < 6.5) {
+    fontSize = 6;
+  }
+  // If still too narrow, leave it — the text will overflow visibly which is
+  // honest signal that the export should have a shorter range. Real users
+  // would typically pick a custom range or a single year.
 
-  return y + 2;
-}
+  doc.setFontSize(fontSize);
+  const rowH = fontSize === 6 ? 3.6 : (fontSize === 7 ? 4 : (fontSize === 8 ? 4.4 : 5));
+  const headH = rowH;
 
-/**
- * Off-screen render one mini-chart and return its PNG data URL.
- * Kept in sync with seizureTypeSmallMultipleChart() in charts.js, with
- * larger fonts for print legibility.
- */
-async function _renderTypeMiniToPNG(buckets, color, mode) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 600;
-  canvas.height = 260;
-  canvas.style.position = 'fixed';
-  canvas.style.left = '-9999px';
-  canvas.style.top = '0';
-  canvas.style.width = '600px';
-  canvas.style.height = '260px';
-  document.body.appendChild(canvas);
+  // Header row
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(90, 84, 76);
+  doc.setFillColor(247, 240, 226); // surface
+  doc.rect(margin, y, usableW, headH, 'F');
+  doc.text('Type', margin + 1, y + headH - 1);
+  for (let i = 0; i < buckets.length; i++) {
+    const cx = margin + labelW + i * cellW + cellW / 2;
+    const label = buckets[i].label;
+    doc.text(label, cx, y + headH - 1, { align: 'center' });
+  }
+  doc.text('Total', margin + labelW + buckets.length * cellW + totalW / 2, y + headH - 1, { align: 'center' });
+  // Underline header
+  doc.setDrawColor(168, 90, 72); // terra-deep
+  doc.setLineWidth(0.3);
+  doc.line(margin, y + headH + 0.2, margin + usableW, y + headH + 0.2);
+  y += headH + 0.6;
 
-  const fmtDur = (s) => {
-    if (s == null) return '—';
-    const r = Math.round(s);
-    const m = Math.floor(r / 60);
-    const rs = r % 60;
-    return `${m}:${String(rs).padStart(2, '0')}`;
-  };
-
-  try {
-    const labels = buckets.map(b => b.label);
-    let datasets;
-    let yMax;
-
-    if (mode === 'duration') {
-      const barData = buckets.map(b => (b.count >= 3 && b.median != null) ? b.median : null);
-      const dotPoints = [];
-      buckets.forEach((b, i) => {
-        if (b.count > 0 && b.count < 3) {
-          b.durations.forEach(d => { if (d != null) dotPoints.push({ x: labels[i], y: d }); });
-        }
-      });
-      datasets = [
-        { type: 'bar', data: barData, backgroundColor: color, borderRadius: 4, maxBarThickness: 36 },
-        { type: 'scatter', data: dotPoints, backgroundColor: color, borderColor: '#fffaf2', borderWidth: 1, pointRadius: 5, showLine: false }
-      ];
-      const allDur = [...barData.filter(v => v != null), ...dotPoints.map(p => p.y)];
-      yMax = allDur.length ? Math.max(...allDur) * 1.15 : 60;
-      if (yMax < 30) yMax = 30;
-    } else {
-      const counts = buckets.map(b => b.count);
-      datasets = [{ type: 'bar', data: counts, backgroundColor: color, borderRadius: 4, maxBarThickness: 36 }];
-      const maxCount = counts.length ? Math.max(...counts, 1) : 1;
-      yMax = Math.max(maxCount + 1, 3);
+  // Body rows
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(45, 42, 38);
+  for (const row of rows) {
+    // Page break per-row if needed
+    if (y + rowH > 280) {
+      doc.addPage();
+      y = margin;
+      // Redraw a tiny header marker so the continuation is readable
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(fontSize);
+      doc.setTextColor(138, 130, 120);
+      doc.text(`${title} (continued)`, margin, y);
+      y += rowH;
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(45, 42, 38);
     }
 
-    const chart = new Chart(canvas, {
-      type: 'bar',
-      data: { labels, datasets },
-      options: {
-        responsive: false,
-        animation: false,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: {
-          x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 6, font: { size: 14 } } },
-          y: {
-            beginAtZero: true,
-            suggestedMax: yMax,
-            ticks: {
-              stepSize: mode === 'duration' ? undefined : 1,
-              precision: mode === 'duration' ? undefined : 0,
-              font: { size: 14 },
-              callback: mode === 'duration' ? (v) => fmtDur(v) : undefined
-            },
-            grid: { color: '#e3d8c5' }
-          }
-        }
+    // Subtle stripe for the totals row
+    if (row.isTotals) {
+      doc.setFillColor(226, 234, 217); // sage-tint
+      doc.rect(margin, y - 0.4, usableW, rowH, 'F');
+    }
+
+    // Partial-bucket background highlight
+    buckets.forEach((b, i) => {
+      if (b.isPartial) {
+        doc.setFillColor(252, 246, 240);
+        doc.rect(margin + labelW + i * cellW, y - 0.4, cellW, rowH, 'F');
       }
     });
 
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const dataUrl = canvas.toDataURL('image/png', 1.0);
-    chart.destroy();
-    return dataUrl;
-  } catch (err) {
-    console.warn('Type mini-chart render failed:', err);
-    return null;
-  } finally {
-    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    // Label — truncate with ellipsis if too long
+    doc.setFont('helvetica', row.bold ? 'bold' : 'normal');
+    let label = row.label;
+    const maxW = labelW - 2;
+    while (doc.getTextWidth(label) > maxW && label.length > 4) {
+      label = label.slice(0, -1);
+    }
+    if (label !== row.label) label = label.slice(0, -1) + '…';
+    doc.text(label, margin + 1, y + rowH - 1);
+
+    // Cells
+    doc.setFont('helvetica', 'normal');
+    for (let i = 0; i < buckets.length; i++) {
+      const cx = margin + labelW + i * cellW + cellW / 2;
+      doc.text(row.cells[i], cx, y + rowH - 1, { align: 'center' });
+    }
+    // Total
+    doc.setFont('helvetica', 'bold');
+    doc.text(row.total, margin + labelW + buckets.length * cellW + totalW / 2, y + rowH - 1, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+
+    y += rowH;
   }
+
+  // Footer line
+  doc.setDrawColor(227, 216, 197);
+  doc.setLineWidth(0.2);
+  doc.line(margin, y + 0.5, margin + usableW, y + 0.5);
+
+  // Reset
+  doc.setFontSize(10);
+  doc.setTextColor(45, 42, 38);
+  return y + 5;
 }
+
 
 /**
  * Render the day-of-week heatmap directly using jsPDF rectangles.

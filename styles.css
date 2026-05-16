@@ -1036,39 +1036,117 @@ body::before {
 }
 .types-subhead .muted { font-weight: 400; }
 
-.types-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.6rem;
+/* v1.5 — Seizure types over time as TABLES (replaces v1.3 small-multiples).
+   Frequency and duration tables stacked. First column (type name) is
+   sticky so it stays visible while horizontally scrolling through months. */
+.types-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 0.25rem;
+  /* A subtle hint at the right edge so users notice horizontal scroll */
+  background:
+    linear-gradient(to right, var(--surface), var(--surface)) left center / 12px 100% no-repeat,
+    linear-gradient(to right, rgba(45,42,38,0.04), transparent) left center / 12px 100% no-repeat,
+    linear-gradient(to left, var(--surface), var(--surface)) right center / 12px 100% no-repeat,
+    linear-gradient(to left, rgba(45,42,38,0.04), transparent) right center / 12px 100% no-repeat;
+  background-attachment: local, scroll, local, scroll;
 }
 
-.types-grid-cell {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  padding: 0.55rem 0.65rem 0.45rem;
-}
-
-.types-grid-cell h5 {
-  font-family: var(--font-sans);
-  font-weight: 600;
+.types-table {
+  border-collapse: collapse;
   font-size: 0.82rem;
-  margin: 0 0 0.15rem;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  width: 100%;
+  min-width: max-content;
+}
+
+.types-table th,
+.types-table td {
+  padding: 0.45rem 0.55rem;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
 
-.types-grid-cell .types-grid-cell-sub {
+.types-table thead th {
+  font-weight: 600;
   font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--ink-mute);
-  margin: 0 0 0.35rem;
+  background: var(--surface);
+  border-bottom: 2px solid var(--line);
 }
 
-.types-grid-cell .mini-canvas-wrap {
-  position: relative;
-  height: 90px;
+.types-table thead th.partial {
+  /* Subtle terracotta-edged marker for partial first/last calendar buckets */
+  border-bottom-color: var(--terracotta-soft);
+}
+
+.types-table th.type-name-col {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  z-index: 1;
+  font-weight: 600;
+  color: var(--ink);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.82rem;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Soft divider on the right of the sticky column so scrolled content
+     doesn't visually merge with it */
+  box-shadow: 1px 0 0 var(--line);
+}
+
+.types-table thead th.type-name-col {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.types-table td.partial {
+  background: rgba(200, 120, 100, 0.04);
+}
+
+.types-table td.empty {
+  color: var(--ink-mute);
+}
+
+.types-table td.few-events sup {
+  color: var(--terracotta);
+  margin-left: 0.1rem;
+}
+
+.types-table tr.totals-row td,
+.types-table tr.totals-row th {
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+  background: rgba(107, 138, 107, 0.06);
+}
+
+.types-table .type-total-col {
+  font-weight: 600;
+  background: rgba(107, 138, 107, 0.06);
+  padding-left: 0.7rem;
+}
+
+/* Subsection headings used inside the types card */
+.types-section + .types-section {
+  margin-top: 1rem;
+}
+
+.types-subhead {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 0.86rem;
+  margin: 0 0 0.45rem;
+  color: var(--ink);
 }
 
 .types-grid-empty {
@@ -1076,24 +1154,6 @@ body::before {
   color: var(--ink-mute);
   padding: 0.6rem 0.2rem;
 }
-
-/* The seizures-by-type count card spans both columns of the stat-grid
-   so the list reads as a single panel rather than two cramped halves. */
-.patterns-grid .stat-card.stat-card--types {
-  grid-column: 1 / -1;
-}
-
-.patterns-grid .stat-card--types .types-list {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  row-gap: 0.18rem;
-  column-gap: 1rem;
-  font-size: 0.85rem;
-  font-variant-numeric: tabular-nums;
-}
-.patterns-grid .stat-card--types .types-list .label { color: var(--ink); }
-.patterns-grid .stat-card--types .types-list .count { font-weight: 600; color: var(--ink); text-align: right; }
-.patterns-grid .stat-card--types .types-list .label.muted { color: var(--ink-mute); }
 
 /* v1.3 — Custom date range picker on Patterns. Renders as an inline
    expansion under the chip row, matching the Export screen's date-range UI. */
@@ -1220,6 +1280,49 @@ body::before {
 }
 .whats-new-panel li { margin-bottom: 0.25rem; }
 .whats-new-panel li strong { font-weight: 600; }
+
+/* v1.5 — Range subtitle (under chips on Trends / Patterns). Small,
+   low-contrast — informational reading, not a control. */
+.range-subtitle {
+  margin: 0.1rem 0 0.9rem;
+  font-style: italic;
+}
+
+/* v1.5 — Abbreviations panel on About page. Reuses the whats-new panel
+   look so the two expandable sections feel like siblings. */
+.abbrev-block {
+  margin: 0.5rem 0 1.2rem;
+}
+.abbrev-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1rem;
+  margin-top: 0.4rem;
+}
+.abbrev-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 1rem;
+  row-gap: 0.4rem;
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.abbrev-list dt {
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.abbrev-list dd {
+  margin: 0;
+  color: var(--ink);
+}
+
+/* v1.5 — Hint line under a form field (e.g. KD start date) */
+.field-hint {
+  margin: 0.25rem 0 0;
+}
 
 /* =====================================================
    Toast

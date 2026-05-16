@@ -263,28 +263,8 @@
       </div>
 
       <div class="field">
-        <label>Ketone method</label>
-        <div class="chip-group" data-field="ketoneMethod">
-          <button type="button" class="chip" data-value="blood">Blood</button>
-          <button type="button" class="chip" data-value="urine">Urine</button>
-        </div>
-      </div>
-
-      <div class="field" id="bloodKetoneField">
         <label>Blood ketone <span class="muted">(mmol/L)</span></label>
         <input type="number" step="0.1" id="bloodKetone" inputmode="decimal" placeholder="e.g. 3.2" />
-      </div>
-
-      <div class="field hidden" id="urineKetoneField">
-        <label>Urine ketone</label>
-        <div class="chip-group" data-field="urineKetone">
-          <button type="button" class="chip" data-value="0">Negative</button>
-          <button type="button" class="chip" data-value="0.5">Trace</button>
-          <button type="button" class="chip" data-value="1.5">Small (+)</button>
-          <button type="button" class="chip" data-value="4">Moderate (++)</button>
-          <button type="button" class="chip" data-value="8">Large (+++)</button>
-          <button type="button" class="chip" data-value="16">Very large (++++)</button>
-        </div>
       </div>
 
       <div class="field">
@@ -371,11 +351,26 @@
 
     <div class="filter-row">
       <div class="chip-group" data-field="trendRange">
+        <button type="button" class="chip hidden" data-value="kd" id="trendKdChip">Since KD</button>
         <button type="button" class="chip" data-value="7">7d</button>
-        <button type="button" class="chip selected" data-value="30">30d</button>
-        <button type="button" class="chip" data-value="90">90d</button>
+        <button type="button" class="chip selected" data-value="30">1m</button>
+        <button type="button" class="chip" data-value="180">6m</button>
+        <button type="button" class="chip" data-value="365">1y</button>
+        <button type="button" class="chip" data-value="custom" id="trendCustomChip">Custom…</button>
       </div>
     </div>
+
+    <div class="patterns-custom-range hidden" id="trendCustomRange">
+      <div class="custom-range-fields">
+        <label>From <input type="date" id="trendCustomFrom"></label>
+        <label>To <input type="date" id="trendCustomTo"></label>
+        <button type="button" class="btn-secondary custom-range-apply" id="trendCustomApply">Apply</button>
+        <button type="button" class="btn-link" id="trendCustomCancel">Cancel</button>
+      </div>
+      <p class="custom-range-error muted small hidden" id="trendCustomError"></p>
+    </div>
+
+    <p class="range-subtitle muted small" id="trendRangeSubtitle"></p>
 
     <div class="filter-row">
       <div class="chip-group" data-field="trendView">
@@ -446,9 +441,11 @@
 
     <div class="filter-row patterns-filter-row">
       <div class="chip-group" data-field="patternsRange">
+        <button type="button" class="chip hidden" data-value="kd" id="patternsKdChip">Since KD</button>
         <button type="button" class="chip" data-value="7">7d</button>
-        <button type="button" class="chip" data-value="30">30d</button>
-        <button type="button" class="chip selected" data-value="90">90d</button>
+        <button type="button" class="chip" data-value="30">1m</button>
+        <button type="button" class="chip" data-value="180">6m</button>
+        <button type="button" class="chip selected" data-value="365">1y</button>
         <button type="button" class="chip" data-value="custom" id="patternsCustomChip">Custom…</button>
       </div>
     </div>
@@ -463,6 +460,8 @@
       <p class="custom-range-error muted small hidden" id="patternsCustomError"></p>
     </div>
 
+    <p class="range-subtitle muted small" id="patternsRangeSubtitle"></p>
+
     <div class="stat-grid patterns-grid" id="patternsStatGrid"></div>
 
     <div class="chart-card">
@@ -474,14 +473,14 @@
     <div class="chart-card" id="patternsTypesCard">
       <h3 id="patternsTypesTitle">Seizure types over time</h3>
       <div class="types-section">
-        <h4 class="types-subhead">Frequency</h4>
-        <div class="types-grid" id="patternsTypesFrequencyGrid"></div>
+        <h4 class="types-subhead">Frequency <span class="muted small">(events per period)</span></h4>
+        <div class="types-table-wrap" id="patternsTypesFrequencyTable"></div>
       </div>
       <div class="types-section">
-        <h4 class="types-subhead">Duration <span class="muted small">(median per bucket; dots = fewer than 3 events)</span></h4>
-        <div class="types-grid" id="patternsTypesDurationGrid"></div>
+        <h4 class="types-subhead">Duration <span class="muted small">(median per period; ‑ = no events; * = fewer than 3 events)</span></h4>
+        <div class="types-table-wrap" id="patternsTypesDurationTable"></div>
       </div>
-      <p class="chart-note muted small" id="patternsTypesNote">One mini-chart per seizure type recorded in this range. Rightmost bar may be a partial period.</p>
+      <p class="chart-note muted small" id="patternsTypesNote">One row per seizure type recorded in this range. First/last column may be a partial period.</p>
     </div>
 
     <div class="chart-card">
@@ -620,8 +619,9 @@
       </div>
 
       <div class="field">
-        <label>Date of birth</label>
-        <input type="date" id="settingDOB" />
+        <label>Date ketogenic diet started <span class="muted">(optional)</span></label>
+        <input type="date" id="settingKdStartDate" />
+        <p class="muted small field-hint">Used to anchor the "Since KD" range and to show "Started keto Mon YYYY" on exported reports. Leave blank if you'd rather not record it.</p>
       </div>
 
       <div class="field">
@@ -641,14 +641,6 @@
       <div class="field hidden" id="customRatioField">
         <label>Custom ratio</label>
         <input type="text" id="settingCustomRatio" placeholder="e.g. 3.5:1" autocomplete="off" />
-      </div>
-
-      <div class="field">
-        <label>Default ketone method</label>
-        <div class="chip-group" data-field="settingDefaultKetone">
-          <button type="button" class="chip" data-value="blood">Blood</button>
-          <button type="button" class="chip" data-value="urine">Urine</button>
-        </div>
       </div>
 
       <p class="section-heading">Target ranges <span class="muted">(set by your ketogenic diet centre)</span></p>
@@ -729,13 +721,13 @@
       <h3 class="about-section-title">How to use it</h3>
 
       <p class="about-subhead"><strong>Logging measurements</strong></p>
-      <p>Tap <em>Log measurement</em> to record a ketone or glucose reading. Choose blood or urine ketone. If you enter both blood ketone and glucose, the GKI is calculated automatically.</p>
+      <p>Tap <em>Log measurement</em> to record a blood ketone or glucose reading. If you enter both blood ketone and glucose, the GKI is calculated automatically.</p>
 
       <p class="about-subhead"><strong>Logging seizures</strong></p>
       <p>Tap <em>Log seizure</em> to start a timer when a seizure begins, and tap <em>Stop</em> when it ends. You can then add the type, possible triggers, and any rescue medication given. If the seizure has already happened, tap <em>Manual entry</em> instead.</p>
 
       <p class="about-subhead"><strong>History and trends</strong></p>
-      <p><em>History</em> shows everything you've logged, day by day. Tap any entry to edit it. <em>Trends</em> shows charts and statistics over the last 7, 30, or 90 days.</p>
+      <p><em>History</em> shows everything you've logged, day by day. Tap any entry to edit it. <em>Trends</em> shows charts and statistics — daily for short ranges, weekly for a month or two, and monthly for longer periods. From there, <em>Patterns</em> goes deeper, including a type-by-month table of seizures.</p>
 
       <p class="about-subhead"><strong>Sharing with your dietitian</strong></p>
       <p><em>Export</em> lets you download a Summary report (PDF, good for clinic) or Detailed records (spreadsheet, good for closer review). You can email these or share them however you'd normally share documents.</p>
@@ -750,6 +742,23 @@
       <p>Everything you log stays on this device. Nothing is uploaded, sent, or shared automatically. The only way data leaves your phone is when you choose to export it (as a PDF, spreadsheet, or backup file) and share it yourself.</p>
       <p>If you delete this app, or clear your browser data, the entries are gone. Use the Backup option periodically if you want to be able to restore your records on a new device.</p>
 
+      <div class="abbrev-block">
+        <button type="button" class="btn-link about-whatsnew-toggle" id="abbrevToggle" aria-expanded="false" aria-controls="abbrevPanel">Abbreviations</button>
+        <div class="abbrev-panel hidden" id="abbrevPanel" role="region" aria-label="Abbreviations used in the app">
+          <dl class="abbrev-list">
+            <dt>KD</dt><dd>Ketogenic diet.</dd>
+            <dt>GKI</dt><dd>Glucose-Ketone Index. Glucose ÷ blood ketone (both mmol/L). A lower number means deeper ketosis relative to glucose.</dd>
+            <dt>AM / PM</dt><dd>Readings or events grouped by time of day. AM = midnight to noon; PM = noon to midnight.</dd>
+            <dt>mmol/L</dt><dd>Millimoles per litre. The unit used for blood ketone (β-hydroxybutyrate) and blood glucose in the UK and most of Europe.</dd>
+            <dt>Classical 4:1 / 3:1 / 2:1</dt><dd>Classical ketogenic diet, by ratio of fat to (protein + carbohydrate) by weight.</dd>
+            <dt>MCT</dt><dd>Medium-chain triglyceride ketogenic diet.</dd>
+            <dt>MKD</dt><dd>Modified ketogenic diet (UK terminology).</dd>
+            <dt>MAD</dt><dd>Modified Atkins diet (US/literature term). Not strictly equivalent to MKD.</dd>
+            <dt>LGIT</dt><dd>Low Glycaemic Index Treatment.</dd>
+          </dl>
+        </div>
+      </div>
+
       <h3 class="about-section-title">Feedback</h3>
       <p>If you spot a problem or have a suggestion, please let your dietitian know — they may be able to pass it on.</p>
 
@@ -758,11 +767,23 @@
       <button type="button" class="btn-ghost" id="showWelcomeAgainBtn">Show welcome screen again</button>
 
       <div class="about-version-block">
-        <p class="about-version muted small">KetoCare · Version 1.4</p>
+        <p class="about-version muted small">KetoCare · Version 1.5</p>
         <button type="button" class="btn-link about-whatsnew-toggle" id="whatsNewToggle" aria-expanded="false" aria-controls="whatsNewPanel">What's new</button>
       </div>
 
       <div class="whats-new-panel hidden" id="whatsNewPanel" role="region" aria-label="Changelog">
+        <h4 class="whats-new-version">v1.5</h4>
+        <ul>
+          <li><strong>Monthly view, like a clinic spreadsheet.</strong> Trends and Patterns now show calendar months as columns (Apr, May, Jun…) for ranges longer than two months, and Mon–Sun weeks for ranges in between. Short ranges still show daily bars.</li>
+          <li><strong>"Since KD" range.</strong> Set when the ketogenic diet started in Settings, and a new chip lets you view everything from that date to now in one go. The export defaults to this range too.</li>
+          <li><strong>Seizure types as a table.</strong> The Patterns screen now shows a type-by-month table of frequency and median duration, rather than mini-charts. Matches what dietitians and neurologists are used to reading at clinic.</li>
+          <li><strong>New ranges 6m and 1y</strong> on Trends and Patterns. "30d" is now labelled "1m". Custom date range available on both screens.</li>
+          <li><strong>Excel: new Monthly tab</strong> right after Summary — types as rows, months as columns, ketones / glucose / GKI / rescue counts summarised underneath. Mirrors the layout that clinicians find easy to read.</li>
+          <li><strong>Abbreviations</strong> explained on the About page.</li>
+          <li>Date of birth no longer asked for — KD start date is what clinical conversations actually use.</li>
+          <li>Urine ketone option removed (blood ketone is what clinical decisions use).</li>
+        </ul>
+
         <h4 class="whats-new-version">v1.4</h4>
         <ul>
           <li>Small "Running version" indicator with a "Check for updates" link at the bottom of the Home screen, so it's easy to see whether your app is up to date.</li>

@@ -760,14 +760,34 @@ function _typeGroupLabel(groupKey, sampleSeizure, settings) {
   return groupKey.charAt(0).toUpperCase() + groupKey.slice(1);
 }
 
-// Build bucket boundaries anchored on toMs and walking backwards.
-// bucket = 'week' → 7-day windows; 'month' → 30-day; 'quarter' → 90-day.
-// The rightmost bucket ends at toMs (may be partial — "this week so far").
-// The leftmost partial bucket (if any) is DROPPED so every visible bar
-// represents the same span. The honest signal is in the chart note:
-// "Rightmost bar may be a partial period."
-// Returns [{ start, end, label }] in chronological (left-to-right) order.
+// Build bucket boundaries for the period [fromMs, toMs].
+//
+// Supported bucket types:
+//   'day'             — one bucket per calendar day (local time).
+//   'calendar-week'   — Mon–Sun ISO weeks; first/last may be partial,
+//                       labelled by the Monday of the week.
+//   'calendar-month'  — Jan, Feb, Mar… proper calendar months. First and
+//                       last buckets may be partial (e.g. "Apr 23 (from
+//                       14)" or "May 26 (to 15)"). v1.5 — this is what
+//                       the dr's spreadsheet uses, so it's the new
+//                       default for ranges >60d.
+//   'week'            — 7-day rolling windows anchored on toMs (legacy).
+//   'month'           — 30-day rolling windows anchored on toMs (legacy).
+//   'quarter'         — 90-day rolling windows anchored on toMs (legacy).
+//
+// For the rolling variants, the leftmost partial bucket (if any) is dropped
+// so every visible bar represents the same span. For the calendar variants,
+// partial first/last buckets are kept and labelled so the dr can see
+// "this is the start of treatment, partial month".
+//
+// Returns [{ start, end, label, isPartial? }] in chronological order.
 function _buildBuckets(fromMs, toMs, bucket) {
+  // ----- Calendar-anchored variants (new in v1.5) -----
+  if (bucket === 'calendar-month') return _buildCalendarMonthBuckets(fromMs, toMs);
+  if (bucket === 'calendar-week')  return _buildCalendarWeekBuckets(fromMs, toMs);
+  if (bucket === 'day')            return _buildDayBuckets(fromMs, toMs);
+
+  // ----- Rolling variants (legacy) -----
   let spanMs;
   if (bucket === 'quarter') spanMs = 90 * 86400000;
   else if (bucket === 'month') spanMs = 30 * 86400000;
@@ -788,6 +808,199 @@ function _buildBuckets(fromMs, toMs, bucket) {
     return d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
   };
   return out.map(b => ({ ...b, label: fmtShort(b.start) }));
+}
+
+// Calendar months from the month containing fromMs to the month containing toMs.
+// The first and last buckets are clipped to fromMs/toMs and labelled to make
+// the partial nature visible.
+function _buildCalendarMonthBuckets(fromMs, toMs) {
+  if (toMs < fromMs) return [];
+  const startD = new Date(fromMs);
+  const endD   = new Date(toMs);
+  const out = [];
+  let y = startD.getFullYear();
+  let m = startD.getMonth();
+  const endY = endD.getFullYear();
+  const endM = endD.getMonth();
+  while (y < endY || (y === endY && m <= endM)) {
+    const monthStart = new Date(y, m, 1, 0, 0, 0, 0).getTime();
+    const monthEnd   = new Date(y, m + 1, 1, 0, 0, 0, 0).getTime() - 1;
+    const bStart = Math.max(monthStart, fromMs);
+    const bEnd   = Math.min(monthEnd, toMs);
+    const monthLabel = new Date(y, m, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+    let label = monthLabel;
+    const isPartialStart = bStart > monthStart;
+    const isPartialEnd   = bEnd < monthEnd;
+    if (isPartialStart && isPartialEnd) {
+      const fromDay = new Date(bStart).getDate();
+      const toDay   = new Date(bEnd).getDate();
+      label = `${monthLabel} (${fromDay}–${toDay})`;
+    } else if (isPartialStart) {
+      const fromDay = new Date(bStart).getDate();
+      label = `${monthLabel} (from ${fromDay})`;
+    } else if (isPartialEnd) {
+      const toDay = new Date(bEnd).getDate();
+      label = `${monthLabel} (to ${toDay})`;
+    }
+    out.push({ start: bStart, end: bEnd, label, isPartial: isPartialStart || isPartialEnd });
+    m++;
+    if (m > 11) { m = 0; y++; }
+  }
+  return out;
+}
+
+// Calendar Mon–Sun weeks covering [fromMs, toMs]. First/last may be partial
+// and are labelled by the Monday of the ISO week (e.g. "12 May").
+function _buildCalendarWeekBuckets(fromMs, toMs) {
+  if (toMs < fromMs) return [];
+  const d = new Date(fromMs);
+  d.setHours(0, 0, 0, 0);
+  // JS Sunday = 0, Monday = 1 ... so days-since-monday = (day + 6) % 7
+  const daysSinceMonday = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - daysSinceMonday);
+  let weekStart = d.getTime();
+  const out = [];
+  while (weekStart <= toMs) {
+    const weekEnd = weekStart + 7 * 86400000 - 1;
+    const bStart = Math.max(weekStart, fromMs);
+    const bEnd   = Math.min(weekEnd, toMs);
+    const label = new Date(weekStart).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    const isPartial = bStart > weekStart || bEnd < weekEnd;
+    out.push({ start: bStart, end: bEnd, label, isPartial });
+    weekStart += 7 * 86400000;
+  }
+  return out;
+}
+
+// One bucket per calendar day in [fromMs, toMs].
+function _buildDayBuckets(fromMs, toMs) {
+  if (toMs < fromMs) return [];
+  const out = [];
+  const start = new Date(fromMs);
+  start.setHours(0, 0, 0, 0);
+  let t = start.getTime();
+  while (t <= toMs) {
+    const dayStart = t;
+    const dayEnd   = t + 86400000 - 1;
+    const bStart = Math.max(dayStart, fromMs);
+    const bEnd   = Math.min(dayEnd, toMs);
+    const label  = new Date(dayStart).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    out.push({ start: bStart, end: bEnd, label, isPartial: false });
+    t += 86400000;
+  }
+  return out;
+}
+
+// v1.5 — auto-pick a bucket type from a range length in days.
+//   ≤7 days   → 'day'              (per-day bars on a single week)
+//   8–60 days → 'calendar-week'    (Mon–Sun weeks; partial ends labelled)
+//   >60 days  → 'calendar-month'   (Jan/Feb/Mar… columns matching the dr's
+//                                   spreadsheet, partial first/last months)
+// Returns { bucket, label } where label is the bucketing name used in
+// chart titles and tab headings ("daily", "weekly", "monthly").
+function autoBucketForDays(days) {
+  if (days <= 7)  return { bucket: 'day',            label: 'daily' };
+  if (days <= 60) return { bucket: 'calendar-week',  label: 'weekly' };
+  return                 { bucket: 'calendar-month', label: 'monthly' };
+}
+
+/* =====================================================
+   v1.5 — Bucketed series builders
+
+   Replacements for dailySeries / morningEveningSeries / dailyCounts that
+   take a bucket type and aggregate the records into per-bucket values.
+
+   The output shape is identical to the daily versions so all existing
+   chart renderers (lineChartCombined, lineChartSplit, barChart) work
+   unchanged — they just see fewer points with bucket-shaped labels.
+
+   For continuous values (ketone, glucose, GKI) we take the mean within
+   each bucket. For counts (seizures) we sum.
+
+   For ≤7d ranges with 'day' bucketing, behaviour is equivalent to the
+   v1.4 daily helpers.
+   ===================================================== */
+function bucketedSeries(records, valueKey, fromMs, toMs, bucket) {
+  const buckets = _buildBuckets(fromMs, toMs, bucket);
+  const cellValues = buckets.map(() => []);
+  for (const r of records) {
+    const ts = r.timestamp || r.startTime;
+    if (ts < fromMs || ts > toMs) continue;
+    const v = typeof valueKey === 'function' ? valueKey(r) : r[valueKey];
+    if (v == null || isNaN(v)) continue;
+    // Find bucket — linear scan, buckets are usually <=12 so this is cheap.
+    for (let i = 0; i < buckets.length; i++) {
+      if (ts >= buckets[i].start && ts <= buckets[i].end) {
+        cellValues[i].push(v);
+        break;
+      }
+    }
+  }
+  const labels = buckets.map(b => b.label);
+  const data = cellValues.map(arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+  return { labels, data, buckets };
+}
+
+function bucketedMorningEveningSeries(records, valueKey, fromMs, toMs, bucket) {
+  const buckets = _buildBuckets(fromMs, toMs, bucket);
+  const cells = buckets.map(() => ({ morning: [], evening: [] }));
+  for (const r of records) {
+    const ts = r.timestamp || r.startTime;
+    if (ts < fromMs || ts > toMs) continue;
+    const v = typeof valueKey === 'function' ? valueKey(r) : r[valueKey];
+    if (v == null || isNaN(v)) continue;
+    const d = new Date(ts);
+    const slot = d.getHours() < MORNING_END_HOUR ? 'morning' : 'evening';
+    for (let i = 0; i < buckets.length; i++) {
+      if (ts >= buckets[i].start && ts <= buckets[i].end) {
+        cells[i][slot].push(v);
+        break;
+      }
+    }
+  }
+  const labels = buckets.map(b => b.label);
+  const morning = cells.map(c => c.morning.length ? c.morning.reduce((a, b) => a + b, 0) / c.morning.length : null);
+  const evening = cells.map(c => c.evening.length ? c.evening.reduce((a, b) => a + b, 0) / c.evening.length : null);
+  return { labels, morning, evening, buckets };
+}
+
+function bucketedCounts(records, fromMs, toMs, bucket) {
+  const buckets = _buildBuckets(fromMs, toMs, bucket);
+  const data = buckets.map(() => 0);
+  for (const r of records) {
+    const ts = r.timestamp || r.startTime;
+    if (ts < fromMs || ts > toMs) continue;
+    for (let i = 0; i < buckets.length; i++) {
+      if (ts >= buckets[i].start && ts <= buckets[i].end) {
+        data[i]++;
+        break;
+      }
+    }
+  }
+  const labels = buckets.map(b => b.label);
+  return { labels, data, buckets };
+}
+
+// v1.5 — seizure-day markers aligned to a bucket index instead of a day index.
+// Returns [{ index, count }] where index is the position of the bucket in
+// the labels array and count is the number of seizures in that bucket.
+// Used by the AM/PM ketone chart on Patterns to show "this bucket had
+// seizures" markers when the chart is monthly/weekly bucketed.
+function seizureBucketMarkers(seizures, fromMs, toMs, bucket) {
+  const buckets = _buildBuckets(fromMs, toMs, bucket);
+  const counts = buckets.map(() => 0);
+  for (const s of seizures) {
+    if (s.startTime < fromMs || s.startTime > toMs) continue;
+    for (let i = 0; i < buckets.length; i++) {
+      if (s.startTime >= buckets[i].start && s.startTime <= buckets[i].end) {
+        counts[i]++;
+        break;
+      }
+    }
+  }
+  return counts
+    .map((count, index) => ({ index, count }))
+    .filter(m => m.count > 0);
 }
 
 // Median of a numeric array (returns null for empty input).
@@ -888,6 +1101,82 @@ function _fmtDuration(secs) {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${String(r).padStart(2, '0')}`;
+}
+
+/* =====================================================
+   v1.5 — seizureTypesByPeriodTable
+
+   Combined frequency + duration table data for the new Patterns monthly
+   tables, the PDF monthly tables, and the XLSX Monthly tab. Replaces the
+   v1.3 small-multiples mini-charts: tables read more honestly at small
+   numbers than tiny bars, and they match the parent's-spreadsheet view
+   that clinicians find useful.
+
+   Returns:
+   {
+     bucket,         // requested bucket type
+     bucketLabel,    // 'daily' | 'weekly' | 'monthly'
+     buckets: [{ start, end, label, isPartial }],
+     types: [{
+       key, label,
+       totalCount,           // sum across all buckets in range
+       totalDurations: [..], // every recorded durationSec across range
+       cells: [{
+         count,              // # events in this bucket
+         median,             // median durationSec, only if count >= 3
+         durations: [..]     // raw seconds list for the bucket (any size)
+       }]
+     }]
+   }
+
+   Sorted by totalCount desc so the most-frequent types appear at the top
+   of the table — matching how the parent's sheet lays out Drop first.
+   ===================================================== */
+function seizureTypesByPeriodTable(seizures, settings, fromMs, toMs, bucket) {
+  const buckets = _buildBuckets(fromMs, toMs, bucket);
+  const groups = {};
+
+  for (const s of seizures) {
+    if (s.startTime < fromMs || s.startTime > toMs) continue;
+    const k = _typeGroupKey(s);
+    if (!groups[k]) groups[k] = { sample: s, events: [] };
+    groups[k].events.push(s);
+  }
+
+  const types = [];
+  for (const [key, g] of Object.entries(groups)) {
+    const cells = buckets.map(b => {
+      const inBucket = g.events.filter(e => e.startTime >= b.start && e.startTime <= b.end);
+      const durations = inBucket
+        .map(e => e.durationSec)
+        .filter(d => d != null && !isNaN(d));
+      return {
+        count: inBucket.length,
+        durations,
+        median: durations.length >= 3 ? _median(durations) : null
+      };
+    });
+    const totalDurations = g.events
+      .map(e => e.durationSec)
+      .filter(d => d != null && !isNaN(d));
+    types.push({
+      key,
+      label: _typeGroupLabel(key, g.sample, settings),
+      totalCount: g.events.length,
+      totalDurations,
+      cells
+    });
+  }
+  types.sort((a, b) => b.totalCount - a.totalCount);
+
+  // Bucket label — derive from the bucket name for display purposes.
+  let bucketLabel = 'weekly';
+  if (bucket === 'day') bucketLabel = 'daily';
+  else if (bucket === 'calendar-month' || bucket === 'month' || bucket === 'quarter') {
+    bucketLabel = bucket === 'quarter' ? 'quarterly' : 'monthly';
+  }
+
+  return { bucket, bucketLabel, buckets, types };
 }
 
 /* =====================================================
@@ -1059,5 +1348,14 @@ window.KCCharts = {
   seizureTypeFrequencyByType,
   seizureTypeDurationByType,
   seizureTypeSmallMultipleChart,
-  seizureTypeCounts
+  seizureTypeCounts,
+  // v1.5
+  autoBucketForDays,
+  seizureTypesByPeriodTable,
+  bucketedSeries,
+  bucketedMorningEveningSeries,
+  bucketedCounts,
+  seizureBucketMarkers,
+  // Helpers exposed for export.js + app.js label formatting
+  fmtDurationMmSs: _fmtDuration
 };

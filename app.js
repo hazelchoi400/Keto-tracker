@@ -15,18 +15,31 @@ const state = {
   editingMeasurementId: null,
   selectedSeizureType: null,
   selectedSeizureTriggers: [],
-  selectedKetoneMethod: 'blood',
-  selectedUrineKetone: null,
   selectedHistoryFilter: 'all',
+  // v1.5 — Range model
+  //
+  // Both Trends and Patterns use the same chip set:
+  //   Since KD / 7d / 1m / 6m / 1y / Custom
+  //
+  // selectedTrendRange / selectedPatternsRange holds the active chip value:
+  //   - a number of days (7, 30, 180, 365) for the preset chips
+  //   - the literal string 'kd' for "Since KD started"
+  //   - 'custom' implies the customXxxRange object is the active range
+  //
+  // Custom range overrides the preset chip value when both ends are set.
+  // KD range is computed at render-time from settings.kdStartDate.
+  //
+  // Defaults: Trends = '30' (1 month), Patterns = '365' (1 year). If a
+  // KD start date is set on first load, both default to 'kd' so the
+  // user lands on the most useful view for clinic prep.
   selectedTrendRange: 30,
-  // 'split' (AM vs PM, default) or 'combined' fallback
   selectedTrendView: 'split',
-  selectedPatternsRange: 90,
-  // v1.3 — custom date range on Patterns. When fromMs/toMs are set the
-  // chip group shows "Custom (X–Y)" and selectedPatternsRange is ignored.
+  customTrendRange: { fromMs: null, toMs: null },
+
+  selectedPatternsRange: 365,
   customPatternsRange: { fromMs: null, toMs: null },
-  selectedSettingVariant: 'classical-4-1',
-  selectedSettingDefaultKetone: 'blood'
+
+  selectedSettingVariant: 'classical-4-1'
 };
 
 /* =====================================================
@@ -147,6 +160,9 @@ async function renderHome() {
   // Always re-read settings so home reflects newly saved values
   const settings = await KCDB.getSettings();
   state.settings = settings;
+  // v1.5 — Settings may have changed since last Home render (e.g. user added
+  // a KD start date in Settings). Reflect that in the chip availability.
+  refreshKdChipVisibility();
   document.getElementById('greetingEyebrow').textContent = getGreeting();
   document.getElementById('greetingName').textContent =
     settings.childName ? `Caring for ${settings.childName}` : 'Welcome';
@@ -406,21 +422,7 @@ function resetMeasurementForm() {
   document.getElementById('gkiHint').textContent = 'Enter blood ketone & glucose to calculate';
   document.getElementById('gkiPreview').classList.remove('in-range', 'out-range');
   document.getElementById('measureAlert').classList.add('hidden');
-
-  const method = state.settings?.defaultKetone || 'blood';
-  state.selectedKetoneMethod = method;
-  selectChipValue('ketoneMethod', method);
-  toggleKetoneFields(method);
-
-  state.selectedUrineKetone = null;
-  document.querySelectorAll('.chip-group[data-field="urineKetone"] .chip').forEach(c => c.classList.remove('selected'));
-
   state.editingMeasurementId = null;
-}
-
-function toggleKetoneFields(method) {
-  document.getElementById('bloodKetoneField').classList.toggle('hidden', method !== 'blood');
-  document.getElementById('urineKetoneField').classList.toggle('hidden', method !== 'urine');
 }
 
 function updateGKIPreview() {
@@ -488,21 +490,28 @@ async function handleMeasurementSubmit(e) {
   const timeStr = document.getElementById('measureTime').value;
   const timestamp = timeStr ? fromLocalInput(timeStr) : Date.now();
 
+  // v1.5 — blood-only input. When editing, preserve any legacy urineKetone
+  // value that was logged in v1.4 or earlier so we don't silently drop it.
+  let existingUrineKetone = null;
+  if (state.editingMeasurementId) {
+    const all = await KCDB.getAllMeasurements();
+    const existing = all.find(m => m.id === state.editingMeasurementId);
+    if (existing && existing.urineKetone != null) {
+      existingUrineKetone = existing.urineKetone;
+    }
+  }
+
   const record = {
     timestamp,
     bloodKetone: null,
-    urineKetone: null,
+    urineKetone: existingUrineKetone, // preserved if present on the edited record
     glucose: null,
     notes: document.getElementById('measureNotes').value.trim(),
     createdAt: Date.now()
   };
 
-  if (state.selectedKetoneMethod === 'blood') {
-    const k = parseFloat(document.getElementById('bloodKetone').value);
-    if (!isNaN(k)) record.bloodKetone = k;
-  } else {
-    if (state.selectedUrineKetone != null) record.urineKetone = parseFloat(state.selectedUrineKetone);
-  }
+  const k = parseFloat(document.getElementById('bloodKetone').value);
+  if (!isNaN(k)) record.bloodKetone = k;
 
   const g = parseFloat(document.getElementById('glucose').value);
   if (!isNaN(g)) record.glucose = g;
@@ -655,18 +664,13 @@ async function handleHistoryItemClick(e) {
     navigateTo('measurement');
     state.editingMeasurementId = id;
     document.getElementById('measureTime').value = toLocalInput(rec.timestamp);
-    if (rec.bloodKetone) {
-      state.selectedKetoneMethod = 'blood';
-      selectChipValue('ketoneMethod', 'blood');
-      toggleKetoneFields('blood');
+    if (rec.bloodKetone != null) {
       document.getElementById('bloodKetone').value = rec.bloodKetone;
-    } else if (rec.urineKetone != null) {
-      state.selectedKetoneMethod = 'urine';
-      selectChipValue('ketoneMethod', 'urine');
-      toggleKetoneFields('urine');
-      state.selectedUrineKetone = rec.urineKetone;
-      selectChipValue('urineKetone', rec.urineKetone);
     }
+    // Older records may still have a urineKetone field (v1.4 and earlier).
+    // We don't surface it in the edit form anymore (v1.5 removed urine input)
+    // but we don't delete it either — see handleMeasurementSubmit for the
+    // same preservation behaviour on save.
     if (rec.glucose) document.getElementById('glucose').value = rec.glucose;
     document.getElementById('measureNotes').value = rec.notes || '';
     updateGKIPreview();
@@ -682,13 +686,103 @@ async function handleHistoryItemClick(e) {
 }
 
 /* =====================================================
+   v1.5 — Range resolution
+
+   Both Trends and Patterns share the chip set:
+     Since KD / 7d / 1m / 6m / 1y / Custom
+
+   resolveRange() takes the active chip value + optional custom range and
+   returns the actual { fromMs, toMs, days, sourceLabel } used by the
+   renderer. sourceLabel is a short human-readable string for chart titles
+   and XLSX/PDF headers ("Last 30 days", "Since KD started · 24 May 2023
+   to today", "5 Mar – 12 May").
+
+   If the chip is 'kd' but no start date is set, the caller has already
+   hidden the chip — but as a safety net we fall back to the preset days.
+   ===================================================== */
+
+const RANGE_PRESET_LABELS = {
+  '7':   'Last 7 days',
+  '30':  'Last month',
+  '180': 'Last 6 months',
+  '365': 'Last year'
+};
+
+function getKdStartMs(settings) {
+  const s = settings || state.settings || {};
+  if (!s.kdStartDate) return null;
+  // Local midnight on the KD start date.
+  const ms = new Date(s.kdStartDate + 'T00:00:00').getTime();
+  return isNaN(ms) ? null : ms;
+}
+
+function resolveRange(chipValue, customRange, settings) {
+  const now = Date.now();
+  const cust = customRange || { fromMs: null, toMs: null };
+
+  // Custom takes precedence whenever both ends are set.
+  if (chipValue === 'custom' || (cust.fromMs != null && cust.toMs != null)) {
+    if (cust.fromMs != null && cust.toMs != null) {
+      const days = Math.max(1, Math.ceil((cust.toMs - cust.fromMs) / 86400000));
+      const fmt = (ms) => new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      return {
+        fromMs: cust.fromMs,
+        toMs: cust.toMs,
+        days,
+        sourceLabel: `${fmt(cust.fromMs)} to ${fmt(cust.toMs)}`,
+        source: 'custom'
+      };
+    }
+    // Custom chip selected but no dates entered yet — fall back to 1y.
+    return resolveRange('365', null, settings);
+  }
+
+  if (chipValue === 'kd') {
+    const kdStart = getKdStartMs(settings);
+    if (kdStart != null) {
+      const days = Math.max(1, Math.ceil((now - kdStart) / 86400000));
+      const fmt = (ms) => new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      return {
+        fromMs: kdStart,
+        toMs: now,
+        days,
+        sourceLabel: `Since KD started · ${fmt(kdStart)} to today`,
+        source: 'kd'
+      };
+    }
+    // KD chip with no start date — shouldn't happen (chip hidden), fall back.
+    return resolveRange('30', null, settings);
+  }
+
+  // Preset numeric days.
+  const days = parseInt(chipValue, 10) || 30;
+  return {
+    fromMs: now - days * 86400000,
+    toMs: now,
+    days,
+    sourceLabel: RANGE_PRESET_LABELS[String(days)] || `Last ${days} days`,
+    source: 'preset'
+  };
+}
+
+/* =====================================================
    TRENDS
    ===================================================== */
 
 async function renderTrends() {
-  const days = state.selectedTrendRange;
-  const toMs = Date.now();
-  const fromMs = toMs - days * 86400000;
+  const settings = state.settings || await KCDB.getSettings();
+  const range = resolveRange(state.selectedTrendRange, state.customTrendRange, settings);
+  const { fromMs, toMs, days, sourceLabel } = range;
+
+  // v1.5 — auto-bucket from the range length
+  //   ≤7d → daily  · 8–60d → weekly (calendar Mon–Sun)  · >60d → monthly (calendar)
+  const { bucket, label: bucketLabel } = KCCharts.autoBucketForDays(days);
+
+  // Show the active range + bucketing in a small subtitle under the chips
+  const subtitleEl = document.getElementById('trendRangeSubtitle');
+  if (subtitleEl) {
+    subtitleEl.textContent = `${sourceLabel} · ${bucketLabel}`;
+  }
 
   const measurements = await KCDB.getMeasurementsBetween(fromMs, toMs);
   const seizures     = await KCDB.getSeizuresBetween(fromMs, toMs);
@@ -699,7 +793,6 @@ async function renderTrends() {
     .filter(m => m.bloodKetone && m.glucose && m.bloodKetone > 0)
     .map(m => m.glucose / m.bloodKetone);
 
-  // Stat cards — "readings" instead of "n", which is opaque to non-clinical parents
   const stats = {
     ketone:  KCCharts.computeStats(ketoneVals),
     glucose: KCCharts.computeStats(glucoseVals),
@@ -740,60 +833,45 @@ async function renderTrends() {
     </div>
   `;
 
-  // Charts
-  const settings = state.settings || await KCDB.getSettings();
+  // Charts — use bucketed series so a 1-year view shows 12 monthly points
+  // instead of 365 daily points. Chart renderers are unchanged.
   const ketoneTarget = (settings.ketoneMin && settings.ketoneMax)
     ? { min: settings.ketoneMin, max: settings.ketoneMax } : null;
   const gkiTarget = (settings.gkiMin != null && settings.gkiMax != null)
     ? { min: settings.gkiMin, max: settings.gkiMax } : null;
 
   if (state.selectedTrendView === 'split') {
-    const ketoneSeries  = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
-    const glucoseSeries = KCCharts.morningEveningSeries(measurements, 'glucose', fromMs, toMs);
-    const gkiSeries     = KCCharts.morningEveningSeries(
+    const ketoneSeries  = KCCharts.bucketedMorningEveningSeries(measurements, 'bloodKetone', fromMs, toMs, bucket);
+    const glucoseSeries = KCCharts.bucketedMorningEveningSeries(measurements, 'glucose', fromMs, toMs, bucket);
+    const gkiSeries     = KCCharts.bucketedMorningEveningSeries(
       measurements,
       (r) => (r.bloodKetone && r.glucose ? r.glucose / r.bloodKetone : null),
-      fromMs, toMs
+      fromMs, toMs, bucket
     );
-    KCCharts.lineChartSplit(
-      'chartKetone', ketoneSeries,
-      KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep,
-      ketoneTarget
-    );
-    KCCharts.lineChartSplit(
-      'chartGlucose', glucoseSeries,
-      KCCharts.COLORS.honey, KCCharts.COLORS.honeyDeep,
-      null
-    );
-    KCCharts.lineChartSplit(
-      'chartGKI', gkiSeries,
-      KCCharts.COLORS.terra, KCCharts.COLORS.terraDeep,
-      gkiTarget
-    );
+    KCCharts.lineChartSplit('chartKetone', ketoneSeries,
+      KCCharts.COLORS.sage, KCCharts.COLORS.sageDeep, ketoneTarget);
+    KCCharts.lineChartSplit('chartGlucose', glucoseSeries,
+      KCCharts.COLORS.honey, KCCharts.COLORS.honeyDeep, null);
+    KCCharts.lineChartSplit('chartGKI', gkiSeries,
+      KCCharts.COLORS.terra, KCCharts.COLORS.terraDeep, gkiTarget);
   } else {
-    // Combined: single line per chart, all readings on a day averaged
-    const ketoneSeries  = KCCharts.dailySeries(measurements, 'bloodKetone', fromMs, toMs);
-    const glucoseSeries = KCCharts.dailySeries(measurements, 'glucose', fromMs, toMs);
-    const gkiSeries     = KCCharts.dailySeries(
+    // Combined: single value per bucket = bucket mean
+    const ketoneSeries  = KCCharts.bucketedSeries(measurements, 'bloodKetone', fromMs, toMs, bucket);
+    const glucoseSeries = KCCharts.bucketedSeries(measurements, 'glucose', fromMs, toMs, bucket);
+    const gkiSeries     = KCCharts.bucketedSeries(
       measurements,
       (r) => (r.bloodKetone && r.glucose ? r.glucose / r.bloodKetone : null),
-      fromMs, toMs
+      fromMs, toMs, bucket
     );
-    KCCharts.lineChartCombined(
-      'chartKetone', ketoneSeries, KCCharts.COLORS.sageDeep,
-      ketoneTarget, null, { label: 'Ketone' }
-    );
-    KCCharts.lineChartCombined(
-      'chartGlucose', glucoseSeries, KCCharts.COLORS.honey,
-      null, null, { label: 'Glucose' }
-    );
-    KCCharts.lineChartCombined(
-      'chartGKI', gkiSeries, KCCharts.COLORS.terra,
-      gkiTarget, null, { label: 'GKI' }
-    );
+    KCCharts.lineChartCombined('chartKetone', ketoneSeries, KCCharts.COLORS.sageDeep,
+      ketoneTarget, null, { label: 'Ketone' });
+    KCCharts.lineChartCombined('chartGlucose', glucoseSeries, KCCharts.COLORS.honey,
+      null, null, { label: 'Glucose' });
+    KCCharts.lineChartCombined('chartGKI', gkiSeries, KCCharts.COLORS.terra,
+      gkiTarget, null, { label: 'GKI' });
   }
 
-  const seizureSeries = KCCharts.dailyCounts(seizures, fromMs, toMs);
+  const seizureSeries = KCCharts.bucketedCounts(seizures, fromMs, toMs, bucket);
   KCCharts.barChart('chartSeizures', seizureSeries.labels, seizureSeries.data, KCCharts.COLORS.terraDeep);
 }
 
@@ -805,31 +883,64 @@ async function renderTrends() {
    "is the number okay?" check stays calm and skimmable.
    ===================================================== */
 
-/* ---------- v1.3: Custom date range picker ---------- */
+/* ---------- v1.5: Shared custom date range picker ----------
 
-// Cap the upper end of the custom range. 1 year keeps the small-multiples
-// grid readable (4 quarterly buckets) and the data-builders fast.
-const PATTERNS_CUSTOM_MAX_DAYS = 366;
+   A single picker config that drives both the Trends and the Patterns
+   custom-range UIs. Each screen has its own state (state.customTrendRange,
+   state.customPatternsRange) and its own DOM ids, but the open/apply/cancel
+   flow is identical so it lives in one place.
 
-function openPatternsCustomRangePicker() {
-  const wrap = document.getElementById('patternsCustomRange');
-  const fromEl = document.getElementById('patternsCustomFrom');
-  const toEl = document.getElementById('patternsCustomTo');
-  const errEl = document.getElementById('patternsCustomError');
+   v1.5 changes from v1.3:
+   - No 1-year cap. Long ranges are fine now that the monthly bucketing
+     keeps the charts/tables compact.
+   - Picker available on both Trends and Patterns (was Patterns-only).
+   ============================================================ */
+
+const CUSTOM_RANGE_CONFIGS = {
+  trend: {
+    wrapId: 'trendCustomRange',
+    fromId: 'trendCustomFrom',
+    toId:   'trendCustomTo',
+    errId:  'trendCustomError',
+    chipId: 'trendCustomChip',
+    chipGroupSelector: '.chip-group[data-field="trendRange"]',
+    getState: () => state.customTrendRange,
+    setState: (r) => { state.customTrendRange = r; },
+    getSelected: () => state.selectedTrendRange,
+    rerender: () => renderTrends()
+  },
+  patterns: {
+    wrapId: 'patternsCustomRange',
+    fromId: 'patternsCustomFrom',
+    toId:   'patternsCustomTo',
+    errId:  'patternsCustomError',
+    chipId: 'patternsCustomChip',
+    chipGroupSelector: '.chip-group[data-field="patternsRange"]',
+    getState: () => state.customPatternsRange,
+    setState: (r) => { state.customPatternsRange = r; },
+    getSelected: () => state.selectedPatternsRange,
+    rerender: () => renderPatterns()
+  }
+};
+
+function openCustomRangePicker(which) {
+  const cfg = CUSTOM_RANGE_CONFIGS[which];
+  if (!cfg) return;
+  const wrap = document.getElementById(cfg.wrapId);
+  const fromEl = document.getElementById(cfg.fromId);
+  const toEl = document.getElementById(cfg.toId);
+  const errEl = document.getElementById(cfg.errId);
   if (!wrap || !fromEl || !toEl) return;
 
-  // Prefill: if a custom range is already active, show those dates;
-  // otherwise use the current preset range as a starting point so the
-  // user only needs to nudge the endpoints.
   const today = new Date();
   const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  const cur = state.customPatternsRange;
+  const cur = cfg.getState();
   if (cur && cur.fromMs != null && cur.toMs != null) {
     fromEl.value = fmt(new Date(cur.fromMs));
     toEl.value = fmt(new Date(cur.toMs));
   } else {
-    const days = state.selectedPatternsRange || 90;
-    fromEl.value = fmt(new Date(today.getTime() - days * 86400000));
+    // Default: last 90 days as a reasonable starting point for both screens
+    fromEl.value = fmt(new Date(today.getTime() - 90 * 86400000));
     toEl.value = fmt(today);
   }
   errEl.classList.add('hidden');
@@ -837,20 +948,24 @@ function openPatternsCustomRangePicker() {
   wrap.classList.remove('hidden');
 }
 
-function closePatternsCustomRangePicker() {
-  document.getElementById('patternsCustomRange').classList.add('hidden');
+function closeCustomRangePicker(which) {
+  const cfg = CUSTOM_RANGE_CONFIGS[which];
+  if (!cfg) return;
+  document.getElementById(cfg.wrapId).classList.add('hidden');
   // Restore the preset chip's selected state so the user isn't stuck
   // with "Custom..." highlighted after cancelling
-  document.querySelectorAll('.chip-group[data-field="patternsRange"] .chip').forEach(c => {
-    c.classList.toggle('selected', c.dataset.value === String(state.selectedPatternsRange));
+  document.querySelectorAll(`${cfg.chipGroupSelector} .chip`).forEach(c => {
+    c.classList.toggle('selected', c.dataset.value === String(cfg.getSelected()));
   });
-  resetPatternsCustomChipLabel();
+  resetCustomChipLabel(which);
 }
 
-function applyPatternsCustomRange() {
-  const fromEl = document.getElementById('patternsCustomFrom');
-  const toEl = document.getElementById('patternsCustomTo');
-  const errEl = document.getElementById('patternsCustomError');
+function applyCustomRange(which) {
+  const cfg = CUSTOM_RANGE_CONFIGS[which];
+  if (!cfg) return;
+  const fromEl = document.getElementById(cfg.fromId);
+  const toEl = document.getElementById(cfg.toId);
+  const errEl = document.getElementById(cfg.errId);
 
   const showErr = (msg) => {
     errEl.textContent = msg;
@@ -859,64 +974,97 @@ function applyPatternsCustomRange() {
 
   if (!fromEl.value || !toEl.value) return showErr('Pick both a start and end date.');
 
-  // Local-midnight start; end-of-day for the To boundary so a range that
-  // includes "today" actually includes everything logged today.
   const fromMs = new Date(fromEl.value + 'T00:00:00').getTime();
   const toMs = new Date(toEl.value + 'T23:59:59.999').getTime();
 
   if (isNaN(fromMs) || isNaN(toMs)) return showErr('Please enter valid dates.');
   if (fromMs > toMs) return showErr('Start date must be on or before end date.');
-
-  const days = Math.ceil((toMs - fromMs) / 86400000);
-  if (days > PATTERNS_CUSTOM_MAX_DAYS) {
-    return showErr(`Range too long — please pick up to ${PATTERNS_CUSTOM_MAX_DAYS} days.`);
-  }
   if (toMs > Date.now() + 86400000) {
     return showErr('End date can\'t be in the future.');
   }
 
-  state.customPatternsRange = { fromMs, toMs };
-  document.getElementById('patternsCustomRange').classList.add('hidden');
-  updatePatternsCustomChipLabel();
-  renderPatterns();
+  cfg.setState({ fromMs, toMs });
+  document.getElementById(cfg.wrapId).classList.add('hidden');
+  updateCustomChipLabel(which);
+  cfg.rerender();
 }
 
-// Update the "Custom..." chip's visible label to "Custom (5 Mar – 12 May)"
-// so the user can see what range is loaded without re-opening the picker.
-function updatePatternsCustomChipLabel() {
-  const chip = document.getElementById('patternsCustomChip');
+// Update the "Custom..." chip to show the loaded range
+function updateCustomChipLabel(which) {
+  const cfg = CUSTOM_RANGE_CONFIGS[which];
+  if (!cfg) return;
+  const chip = document.getElementById(cfg.chipId);
   if (!chip) return;
-  const r = state.customPatternsRange;
+  const r = cfg.getState();
   if (!r || r.fromMs == null || r.toMs == null) {
-    resetPatternsCustomChipLabel();
+    resetCustomChipLabel(which);
     return;
   }
   const fmt = (ms) => new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   chip.textContent = `Custom (${fmt(r.fromMs)} – ${fmt(r.toMs)})`;
-  // Mark selected manually since the chip group's data-value is "custom"
-  document.querySelectorAll('.chip-group[data-field="patternsRange"] .chip').forEach(c => {
+  document.querySelectorAll(`${cfg.chipGroupSelector} .chip`).forEach(c => {
     c.classList.toggle('selected', c.dataset.value === 'custom');
   });
 }
 
-function resetPatternsCustomChipLabel() {
-  const chip = document.getElementById('patternsCustomChip');
+function resetCustomChipLabel(which) {
+  const cfg = CUSTOM_RANGE_CONFIGS[which];
+  if (!cfg) return;
+  const chip = document.getElementById(cfg.chipId);
   if (chip) chip.textContent = 'Custom…';
 }
 
+/* Wrappers kept for any leftover call sites */
+function openPatternsCustomRangePicker()   { openCustomRangePicker('patterns'); }
+function closePatternsCustomRangePicker()  { closeCustomRangePicker('patterns'); }
+function applyPatternsCustomRange()        { applyCustomRange('patterns'); }
+function updatePatternsCustomChipLabel()   { updateCustomChipLabel('patterns'); }
+function resetPatternsCustomChipLabel()    { resetCustomChipLabel('patterns'); }
+
+/* ---------- Show/hide "Since KD" chip based on whether kdStartDate is set ---------- */
+
+function refreshKdChipVisibility() {
+  const kdStart = getKdStartMs(state.settings);
+  const hasKd = kdStart != null;
+  const trendKd = document.getElementById('trendKdChip');
+  const patternsKd = document.getElementById('patternsKdChip');
+  if (trendKd) trendKd.classList.toggle('hidden', !hasKd);
+  if (patternsKd) patternsKd.classList.toggle('hidden', !hasKd);
+  // If KD was just turned off but the active range was 'kd', drop back to 1m / 1y.
+  if (!hasKd) {
+    if (state.selectedTrendRange === 'kd') {
+      state.selectedTrendRange = 30;
+      syncRangeChipSelection('trendRange', 30);
+    }
+    if (state.selectedPatternsRange === 'kd') {
+      state.selectedPatternsRange = 365;
+      syncRangeChipSelection('patternsRange', 365);
+    }
+  }
+}
+
+// Mark the chip matching `value` as selected in the named chip group; clear
+// selection on all others. Custom-range chip is handled by its own helpers.
+function syncRangeChipSelection(groupField, value) {
+  const target = String(value);
+  document.querySelectorAll(`.chip-group[data-field="${groupField}"] .chip`).forEach(c => {
+    c.classList.toggle('selected', c.dataset.value === target);
+  });
+}
+
+
 async function renderPatterns() {
-  // v1.3 — range can come from either the preset chips (7/30/90) or a
-  // user-picked custom date pair. Custom wins when both ends are set.
-  const custom = state.customPatternsRange;
-  let fromMs, toMs, days;
-  if (custom && custom.fromMs != null && custom.toMs != null) {
-    fromMs = custom.fromMs;
-    toMs = custom.toMs;
-    days = Math.max(1, Math.ceil((toMs - fromMs) / 86400000));
-  } else {
-    days = state.selectedPatternsRange;
-    toMs = Date.now();
-    fromMs = toMs - days * 86400000;
+  const settings = state.settings || await KCDB.getSettings();
+  const range = resolveRange(state.selectedPatternsRange, state.customPatternsRange, settings);
+  const { fromMs, toMs, days, sourceLabel } = range;
+
+  // Auto-bucket (≤7d daily, 8–60d weekly, >60d monthly)
+  const { bucket, label: bucketLabel } = KCCharts.autoBucketForDays(days);
+
+  // Range subtitle below chips
+  const subtitleEl = document.getElementById('patternsRangeSubtitle');
+  if (subtitleEl) {
+    subtitleEl.textContent = `${sourceLabel} · ${bucketLabel}`;
   }
 
   const measurements = await KCDB.getMeasurementsBetween(fromMs, toMs);
@@ -949,22 +1097,22 @@ async function renderPatterns() {
   const amSeizures = seizures.filter(s => isMorning(s.startTime));
   const pmSeizures = seizures.filter(s => !isMorning(s.startTime));
 
-  const settings = state.settings || await KCDB.getSettings();
-
+  // v1.5 — Removed the standalone "Seizures by type" count card. The
+  // Total column on the new types table fills the same role.
   document.getElementById('patternsStatGrid').innerHTML = `
     ${patternsStatCard('Ketone (mmol/L)', stats.ketoneAM, stats.ketonePM)}
     ${patternsStatCard('Glucose (mmol/L)', stats.glucoseAM, stats.glucosePM)}
     ${patternsStatCard('GKI', stats.gkiAM, stats.gkiPM)}
     ${patternsSeizureCard(amSeizures.length, pmSeizures.length, days)}
-    ${patternsSeizureTypeCountCard(seizures, settings, days)}
   `;
 
-  // Ketone chart — AM/PM split with seizure-day markers along the baseline
+  // Ketone chart — AM/PM split using the same bucketing as the rest of
+  // the screen, with seizure-bucket markers along the baseline.
   const ketoneTarget = (settings.ketoneMin && settings.ketoneMax)
     ? { min: settings.ketoneMin, max: settings.ketoneMax } : null;
 
-  const ketoneSeries = KCCharts.morningEveningSeries(measurements, 'bloodKetone', fromMs, toMs);
-  const seizureMarkers = KCCharts.seizureDayMarkers(seizures, fromMs, toMs);
+  const ketoneSeries = KCCharts.bucketedMorningEveningSeries(measurements, 'bloodKetone', fromMs, toMs, bucket);
+  const seizureMarkers = KCCharts.seizureBucketMarkers(seizures, fromMs, toMs, bucket);
 
   // Hide note line if there are no markers to explain
   const noteEl = document.getElementById('patternsKetoneNote');
@@ -977,14 +1125,14 @@ async function renderPatterns() {
     { markers: seizureMarkers }
   );
 
-  // v1.3 — Seizure types over time (small-multiples frequency + duration)
-  renderSeizureTypesOverTime(seizures, settings, fromMs, toMs, days);
+  // v1.5 — Seizure types over time as TABLES (replaces v1.3 small-multiples)
+  renderSeizureTypesTable(seizures, settings, fromMs, toMs, bucket, bucketLabel);
 
   // Hour-of-day histogram
   const hourSeries = KCCharts.seizuresByHour(seizures);
   KCCharts.hourHistogramChart('patternsHourChart', hourSeries.data, KCCharts.COLORS.terraDeep);
 
-  // Day-of-week heatmap — rendered as HTML/CSS, not a Chart.js canvas
+  // Day-of-week heatmap — unchanged from v1.4 (decision pending)
   renderHeatmap(seizures, fromMs, toMs, days);
 
   // Triggers frequency tally
@@ -1121,110 +1269,112 @@ function patternsSeizureCard(amCount, pmCount, days) {
 }
 
 /**
- * v1.3 — Seizures-by-type count card. Full-width fifth panel in the Patterns
- * stat grid. Shows one row per type with the total over the range. Hidden
- * entirely (returns '') if there are no seizures in the range.
+ * v1.5 — Render the seizure types over time as a TABLE (replaces v1.3
+ * small-multiples mini-charts). Two stacked tables: frequency (counts per
+ * bucket) and duration (median per bucket, blank when no events, "*" when
+ * fewer than 3 events). One row per type that appeared in range, sorted
+ * by total desc — most-frequent types at the top, matching the dr's
+ * spreadsheet layout.
+ *
+ * Hidden card at <14d range (not enough buckets to be meaningful for a
+ * trend view; the count card alternative was removed).
  */
-function patternsSeizureTypeCountCard(seizures, settings, days) {
-  if (!seizures.length) return '';
-  const counts = KCCharts.seizureTypeCounts(seizures, settings);
-  if (!counts.length) return '';
-  const total = counts.reduce((a, c) => a + c.count, 0);
-  const rows = counts.map(c =>
-    `<span class="label">${escapeHtml(c.label)}</span><span class="count">${c.count}</span>`
-  ).join('');
-  return `
-    <div class="stat-card stat-card--types">
-      <p class="stat-name">Seizures by type</p>
-      <div class="types-list">
-        ${rows}
-        <span class="label muted">Total events</span>
-        <span class="count">${total}</span>
-      </div>
-    </div>
-  `;
-}
-
-/**
- * v1.3 — Render the small-multiples seizure-types-over-time card.
- * Stacked frequency and duration grids; one mini-chart per type.
- * Hidden card at <14d range (not enough buckets to be meaningful).
- */
-function renderSeizureTypesOverTime(seizures, settings, fromMs, toMs, days) {
+function renderSeizureTypesTable(seizures, settings, fromMs, toMs, bucket, bucketLabel) {
   const card = document.getElementById('patternsTypesCard');
   const titleEl = document.getElementById('patternsTypesTitle');
-  const freqGrid = document.getElementById('patternsTypesFrequencyGrid');
-  const durGrid = document.getElementById('patternsTypesDurationGrid');
-  if (!card || !freqGrid || !durGrid) return;
+  const freqWrap = document.getElementById('patternsTypesFrequencyTable');
+  const durWrap  = document.getElementById('patternsTypesDurationTable');
+  if (!card || !freqWrap || !durWrap) return;
 
-  // Below 14 days we don't have enough buckets for a trend view. Hide the
-  // whole card and show a small notice so the parent knows it's available
-  // at longer ranges.
+  const days = Math.max(1, Math.ceil((toMs - fromMs) / 86400000));
   if (days < 14) {
     titleEl.textContent = 'Seizure types over time';
-    freqGrid.innerHTML = '<p class="types-grid-empty">Available at 14+ days range.</p>';
-    durGrid.innerHTML = '';
+    freqWrap.innerHTML = '<p class="types-grid-empty">Available at 14+ days range.</p>';
+    durWrap.innerHTML = '';
     return;
   }
 
-  // v1.3 — auto-pick bucket from range length. Same rule used by the
-  // Patterns data tab in the XLSX export:
-  //   ≤21d    → weekly
-  //   22–120d → monthly
-  //   >120d   → quarterly (90-day windows)
-  // Title shows the active bucketing so the reader knows what each bar means.
-  let bucket, bucketLabel;
-  if (days <= 21)       { bucket = 'week';    bucketLabel = 'weekly'; }
-  else if (days <= 120) { bucket = 'month';   bucketLabel = 'monthly'; }
-  else                  { bucket = 'quarter'; bucketLabel = 'quarterly'; }
   titleEl.textContent = `Seizure types over time — ${bucketLabel}`;
 
-  const freqData = KCCharts.seizureTypeFrequencyByType(seizures, settings, fromMs, toMs, bucket);
+  const table = KCCharts.seizureTypesByPeriodTable(seizures, settings, fromMs, toMs, bucket);
 
-  if (!freqData.length) {
-    freqGrid.innerHTML = '<p class="types-grid-empty">No seizures logged in this period.</p>';
-    durGrid.innerHTML = '';
+  if (!table.types.length) {
+    freqWrap.innerHTML = '<p class="types-grid-empty">No seizures logged in this period.</p>';
+    durWrap.innerHTML = '';
     return;
   }
 
-  // Frequency grid — one cell per type.
-  freqGrid.innerHTML = freqData.map((t, i) => `
-    <div class="types-grid-cell">
-      <h5 title="${escapeHtml(t.label)}">${escapeHtml(t.label)}</h5>
-      <p class="types-grid-cell-sub">${t.total} event${t.total === 1 ? '' : 's'} total</p>
-      <div class="mini-canvas-wrap"><canvas id="patternsTypesFreq_${i}"></canvas></div>
-    </div>
-  `).join('');
+  // Shared header row (column labels = bucket labels + Total)
+  const headerCells = table.buckets.map(b =>
+    `<th class="type-col${b.isPartial ? ' partial' : ''}" title="${escapeHtml(b.label)}">${escapeHtml(b.label)}</th>`
+  ).join('');
+  const headerRow = `<thead><tr><th class="type-name-col">Type</th>${headerCells}<th class="type-total-col">Total</th></tr></thead>`;
 
-  // Duration grid — only types that have at least one timed event in range.
-  const durData = KCCharts.seizureTypeDurationByType(seizures, settings, fromMs, toMs, bucket);
+  // Frequency body
+  const freqBody = table.types.map(t => {
+    const cells = t.cells.map((c, i) => {
+      const isPartial = table.buckets[i].isPartial;
+      if (c.count === 0) return `<td class="empty${isPartial ? ' partial' : ''}">—</td>`;
+      return `<td${isPartial ? ' class="partial"' : ''}>${c.count}</td>`;
+    }).join('');
+    return `<tr><th class="type-name-col" title="${escapeHtml(t.label)}">${escapeHtml(t.label)}</th>${cells}<td class="type-total-col"><strong>${t.totalCount}</strong></td></tr>`;
+  }).join('');
 
-  if (!durData.length) {
-    durGrid.innerHTML = '<p class="types-grid-empty">No timed seizures logged in this period.</p>';
-  } else {
-    durGrid.innerHTML = durData.map((t, i) => `
-      <div class="types-grid-cell">
-        <h5 title="${escapeHtml(t.label)}">${escapeHtml(t.label)}</h5>
-        <p class="types-grid-cell-sub">${t.totalWithDuration} timed event${t.totalWithDuration === 1 ? '' : 's'}</p>
-        <div class="mini-canvas-wrap"><canvas id="patternsTypesDur_${i}"></canvas></div>
-      </div>
-    `).join('');
-  }
+  // Period totals row at the bottom of the frequency table — matches the
+  // parent's spreadsheet style of having a summary row across all months.
+  const periodTotals = table.buckets.map((b, i) => {
+    const sum = table.types.reduce((acc, t) => acc + (t.cells[i] ? t.cells[i].count : 0), 0);
+    return `<td class="period-total${b.isPartial ? ' partial' : ''}">${sum || '—'}</td>`;
+  }).join('');
+  const grandTotal = table.types.reduce((a, t) => a + t.totalCount, 0);
+  const totalsRow = `<tr class="totals-row"><th class="type-name-col">All types</th>${periodTotals}<td class="type-total-col"><strong>${grandTotal}</strong></td></tr>`;
 
-  // Render charts after DOM is in place — short defer so Chart.js sees the
-  // canvases at their final layout size.
-  requestAnimationFrame(() => {
-    freqData.forEach((t, i) => {
-      KCCharts.seizureTypeSmallMultipleChart(
-        `patternsTypesFreq_${i}`, t.buckets, KCCharts.COLORS.terraDeep, 'frequency'
-      );
-    });
-    durData.forEach((t, i) => {
-      KCCharts.seizureTypeSmallMultipleChart(
-        `patternsTypesDur_${i}`, t.buckets, KCCharts.COLORS.terraDeep, 'duration'
-      );
-    });
-  });
+  freqWrap.innerHTML = `
+    <table class="types-table">
+      ${headerRow}
+      <tbody>${freqBody}${totalsRow}</tbody>
+    </table>
+  `;
+
+  // Duration body
+  const durBody = table.types.map(t => {
+    const cells = t.cells.map((c, i) => {
+      const isPartial = table.buckets[i].isPartial;
+      const cls = isPartial ? ' partial' : '';
+      if (c.count === 0) return `<td class="empty${cls}">—</td>`;
+      if (c.count < 3) {
+        // Show first event's seconds + "*" marker
+        const first = c.durations.length ? KCCharts.fmtDurationMmSs(c.durations[0]) : '—';
+        const tip = c.count === 1
+          ? '1 event — too few for a median'
+          : `${c.count} events — too few for a median`;
+        return `<td class="few-events${cls}" title="${tip}">${first}<sup>*</sup></td>`;
+      }
+      return `<td${cls ? ` class="${cls.trim()}"` : ''}>${KCCharts.fmtDurationMmSs(c.median)}</td>`;
+    }).join('');
+    // "Total" column for duration = median across all events in range (or — if <3)
+    const totalDurations = t.totalDurations;
+    let totalCell;
+    if (!totalDurations.length) {
+      totalCell = '<td class="type-total-col">—</td>';
+    } else if (totalDurations.length < 3) {
+      const first = KCCharts.fmtDurationMmSs(totalDurations[0]);
+      totalCell = `<td class="type-total-col"><strong>${first}<sup>*</sup></strong></td>`;
+    } else {
+      const sorted = totalDurations.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      const med = sorted.length % 2 ? sorted[mid] : (sorted[mid-1] + sorted[mid]) / 2;
+      totalCell = `<td class="type-total-col"><strong>${KCCharts.fmtDurationMmSs(med)}</strong></td>`;
+    }
+    return `<tr><th class="type-name-col" title="${escapeHtml(t.label)}">${escapeHtml(t.label)}</th>${cells}${totalCell}</tr>`;
+  }).join('');
+
+  durWrap.innerHTML = `
+    <table class="types-table">
+      ${headerRow}
+      <tbody>${durBody}</tbody>
+    </table>
+  `;
 }
 
 // Tiny HTML escape used by the new type labels (handles custom labels that
@@ -1236,14 +1386,24 @@ function renderSeizureTypesOverTime(seizures, settings, fromMs, toMs, days) {
 
 function initExportScreen() {
   const today = new Date();
-  const monthAgo = new Date(today.getTime() - 30*86400000);
   const fmt = (d) => {
     const pad = n => String(n).padStart(2,'0');
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   };
   const fromEl = document.getElementById('exportFrom');
   const toEl = document.getElementById('exportTo');
-  if (!fromEl.value) fromEl.value = fmt(monthAgo);
+  // v1.5 — default the From date to the KD start date if one is set, so the
+  // export covers the whole treatment period (matching what the dr looks at).
+  // Otherwise fall back to the last 30 days, as in v1.4.
+  if (!fromEl.value) {
+    const kdStart = getKdStartMs(state.settings);
+    if (kdStart != null) {
+      fromEl.value = state.settings.kdStartDate;
+    } else {
+      const monthAgo = new Date(today.getTime() - 30*86400000);
+      fromEl.value = fmt(monthAgo);
+    }
+  }
   if (!toEl.value)   toEl.value = fmt(today);
 }
 
@@ -1263,13 +1423,11 @@ async function populateSettingsForm() {
   const s = await KCDB.getSettings();
   state.settings = s;
   document.getElementById('settingChildName').value = s.childName || '';
-  document.getElementById('settingDOB').value = s.dob || '';
+  document.getElementById('settingKdStartDate').value = s.kdStartDate || '';
   selectChipValue('settingVariant', s.variant);
   state.selectedSettingVariant = s.variant;
   document.getElementById('settingCustomRatio').value = s.customRatio || '';
   toggleCustomRatioField(s.variant === 'custom');
-  selectChipValue('settingDefaultKetone', s.defaultKetone);
-  state.selectedSettingDefaultKetone = s.defaultKetone;
   document.getElementById('settingKetoneMin').value = s.ketoneMin ?? '';
   document.getElementById('settingKetoneMax').value = s.ketoneMax ?? '';
   document.getElementById('settingGKIMin').value = s.gkiMin ?? '';
@@ -1305,12 +1463,14 @@ function getCustomSeizureTypes() {
 async function handleSettingsSubmit(e) {
   e.preventDefault();
   const settings = {
-    ...(state.settings || {}),  // preserve fields not in the form (e.g. welcomeDismissed, reminders)
+    // Preserve fields not in the form (welcomeDismissed, reminders, dob, defaultKetone).
+    // v1.5 dropped DOB and defaultKetone from the UI but the fields stay on the
+    // record so older backups round-trip cleanly.
+    ...(state.settings || {}),
     childName: document.getElementById('settingChildName').value.trim(),
-    dob: document.getElementById('settingDOB').value,
+    kdStartDate: document.getElementById('settingKdStartDate').value || '',
     variant: state.selectedSettingVariant,
     customRatio: document.getElementById('settingCustomRatio').value.trim(),
-    defaultKetone: state.selectedSettingDefaultKetone,
     ketoneMin: parseFloat(document.getElementById('settingKetoneMin').value) || null,
     ketoneMax: parseFloat(document.getElementById('settingKetoneMax').value) || null,
     gkiMin: parseFloat(document.getElementById('settingGKIMin').value) || null,
@@ -1321,6 +1481,8 @@ async function handleSettingsSubmit(e) {
   };
   await KCDB.saveSettings(settings);
   state.settings = settings;
+  // Show/hide the "Since KD" chip now that the start date may have changed
+  refreshKdChipVisibility();
   toast('Settings saved');
   navigateTo('home');
 }
@@ -1340,7 +1502,7 @@ async function handleSettingsSubmit(e) {
 // Single source of truth for the version label shown in-app. Keep in
 // sync with CACHE_NAME in sw.js. The "Check for updates" button compares
 // against this to decide what to tell the user.
-const APP_VERSION = 'v1.4';
+const APP_VERSION = 'v1.5';
 
 // Captured by registerServiceWorker() so the button has a reference.
 let _swRegistration = null;
@@ -1431,6 +1593,18 @@ async function handleImportFile(e) {
 document.addEventListener('DOMContentLoaded', async () => {
   state.settings = await KCDB.getSettings();
 
+  // v1.5 — Show/hide the "Since KD" chip; if a start date is set, make that
+  // the default range on both Trends and Patterns so the user lands on the
+  // most useful view for clinic prep without needing to tap.
+  refreshKdChipVisibility();
+  if (getKdStartMs(state.settings) != null) {
+    state.selectedTrendRange = 'kd';
+    state.selectedPatternsRange = 'kd';
+  }
+  // Reflect state on the chip group selections.
+  syncRangeChipSelection('trendRange', state.selectedTrendRange);
+  syncRangeChipSelection('patternsRange', state.selectedPatternsRange);
+
   // First-time launch: show Welcome screen (replaces the old toast nudge)
   if (!state.settings.welcomeDismissed) {
     navigateTo('welcome');
@@ -1478,12 +1652,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Measurement form
-  setupChipGroup('ketoneMethod', false, (v) => {
-    state.selectedKetoneMethod = v;
-    toggleKetoneFields(v);
-  });
-  setupChipGroup('urineKetone', false, (v) => { state.selectedUrineKetone = v; });
+  // Measurement form — v1.5: blood-only, no method toggle
   document.getElementById('measurementForm').addEventListener('submit', handleMeasurementSubmit);
   document.getElementById('bloodKetone').addEventListener('input', updateGKIPreview);
   document.getElementById('glucose').addEventListener('input', updateGKIPreview);
@@ -1495,46 +1664,76 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('historyList').addEventListener('click', handleHistoryItemClick);
 
-  // Trends range
-  setupChipGroup('trendRange', false, (v) => {
-    state.selectedTrendRange = parseInt(v, 10);
-    renderTrends();
-  });
+  // v1.5 — Generic range chip handler (Trends + Patterns share the same logic)
+  const setupRangeChips = (groupField, openPicker, customClearer, applyRange, rerender) => {
+    setupChipGroup(groupField, false, (v) => {
+      if (v === 'custom') {
+        openPicker();
+        return;
+      }
+      customClearer();
+      applyRange(v);
+      rerender();
+    });
+  };
+
+  setupRangeChips(
+    'trendRange',
+    () => openCustomRangePicker('trend'),
+    () => {
+      state.customTrendRange = { fromMs: null, toMs: null };
+      document.getElementById('trendCustomRange').classList.add('hidden');
+      resetCustomChipLabel('trend');
+    },
+    (v) => { state.selectedTrendRange = (v === 'kd') ? 'kd' : parseInt(v, 10); },
+    renderTrends
+  );
   // Trends view: split (AM vs PM, default) or combined fallback
   setupChipGroup('trendView', false, (v) => {
     state.selectedTrendView = v;
     renderTrends();
   });
-  // Patterns range
-  setupChipGroup('patternsRange', false, (v) => {
-    if (v === 'custom') {
-      openPatternsCustomRangePicker();
-      return;
-    }
-    // Preset chip clicked — clear any custom range and re-render
-    state.customPatternsRange = { fromMs: null, toMs: null };
-    state.selectedPatternsRange = parseInt(v, 10);
-    document.getElementById('patternsCustomRange').classList.add('hidden');
-    resetPatternsCustomChipLabel();
-    renderPatterns();
-  });
+  setupRangeChips(
+    'patternsRange',
+    () => openCustomRangePicker('patterns'),
+    () => {
+      state.customPatternsRange = { fromMs: null, toMs: null };
+      document.getElementById('patternsCustomRange').classList.add('hidden');
+      resetCustomChipLabel('patterns');
+    },
+    (v) => { state.selectedPatternsRange = (v === 'kd') ? 'kd' : parseInt(v, 10); },
+    renderPatterns
+  );
 
-  // v1.3 — Custom range picker buttons
-  const applyBtn = document.getElementById('patternsCustomApply');
-  if (applyBtn) applyBtn.addEventListener('click', applyPatternsCustomRange);
-  const cancelBtn = document.getElementById('patternsCustomCancel');
-  if (cancelBtn) cancelBtn.addEventListener('click', closePatternsCustomRangePicker);
+  // v1.5 — Custom range picker buttons (Trends + Patterns)
+  const wireCustomPicker = (which, applyId, cancelId) => {
+    const applyBtn  = document.getElementById(applyId);
+    const cancelBtn = document.getElementById(cancelId);
+    if (applyBtn)  applyBtn.addEventListener('click',  () => applyCustomRange(which));
+    if (cancelBtn) cancelBtn.addEventListener('click', () => closeCustomRangePicker(which));
+  };
+  wireCustomPicker('trend',    'trendCustomApply',    'trendCustomCancel');
+  wireCustomPicker('patterns', 'patternsCustomApply', 'patternsCustomCancel');
 
   // Settings
   setupChipGroup('settingVariant', false, (v) => {
     state.selectedSettingVariant = v;
     toggleCustomRatioField(v === 'custom');
   });
-  setupChipGroup('settingDefaultKetone', false, (v) => { state.selectedSettingDefaultKetone = v; });
   document.getElementById('settingsForm').addEventListener('submit', handleSettingsSubmit);
 
   // v1.4 — Updates block
   document.getElementById('checkForUpdatesBtn').addEventListener('click', handleCheckForUpdates);
+
+  // v1.5 — Abbreviations expandable panel on About page
+  const abbrevToggle = document.getElementById('abbrevToggle');
+  const abbrevPanel  = document.getElementById('abbrevPanel');
+  if (abbrevToggle && abbrevPanel) {
+    abbrevToggle.addEventListener('click', () => {
+      const hidden = abbrevPanel.classList.toggle('hidden');
+      abbrevToggle.setAttribute('aria-expanded', String(!hidden));
+    });
+  }
 
   // Custom seizure types — add / remove
   document.getElementById('addCustomSeizureTypeBtn').addEventListener('click', () => {
@@ -1560,6 +1759,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!confirm('Last chance — really delete everything?')) return;
     await KCDB.clearAll();
     state.settings = await KCDB.getSettings();
+    refreshKdChipVisibility();
     toast('All data cleared');
     navigateTo('home');
   });

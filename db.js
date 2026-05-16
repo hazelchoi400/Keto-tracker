@@ -52,11 +52,15 @@ function promisify(req) {
 
 const DEFAULT_SETTINGS = {
   childName: '',
-  dob: '',
+  // v1.5 — date the child started the ketogenic diet (ISO YYYY-MM-DD).
+  // Drives the "Since KD started" range option, the default export window,
+  // and the "Started keto Mon YYYY" line on PDF/XLSX headers.
+  // Replaces the v1.4 `dob` field (date of birth) which never appeared
+  // anywhere clinically useful — KD start date is what the dr asks for.
+  kdStartDate: '',
   variant: 'classical-4-1',
   // Custom ratio label for variant === 'custom'. Free text e.g. "3.5:1".
   customRatio: '',
-  defaultKetone: 'blood',
   ketoneMin: 3,
   ketoneMax: 5,
   gkiMin: 1,
@@ -68,9 +72,13 @@ const DEFAULT_SETTINGS = {
   // Parent-defined seizure types (additive to the standard pills)
   // Stored as an array of short labels, e.g. ["Eye blink (focal)", "Head drop"]
   customSeizureTypes: [],
-  // Legacy field — reminders feature removed in v1.4 (PWAs can't fire
-  // reliable background alarms). Kept on the schema so older backups
-  // restore cleanly; not surfaced anywhere in the UI.
+  // Legacy fields kept on the schema so older backups restore cleanly;
+  // not surfaced anywhere in the UI.
+  //   dob:           date of birth, removed v1.5
+  //   defaultKetone: urine/blood toggle, removed v1.5 (urine removed)
+  //   reminders:     PWA reminders, removed v1.4
+  dob: '',
+  defaultKetone: 'blood',
   reminders: [],
   welcomeDismissed: false
 };

@@ -337,6 +337,8 @@ function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
 
   // Treatment / outcome rows
   rows.push(physRow('Seizure-free days',               cells.map(c => c.seizureFreeDays),      sum(cells.map(c => c.seizureFreeDays))));
+  rows.push(physRow('Total seizure duration (mm:ss)',  cells.map(c => c.durations.length ? fmtDuration(c.durations.reduce((a,b) => a+b, 0)) : ''),
+                                                       fmtDuration(allDurations.length ? allDurations.reduce((a,b) => a+b, 0) : '')));
   rows.push(physRow('Median seizure duration (mm:ss)', cells.map(c => fmtDuration(medianOrDash(c.durations))), fmtDuration(medianOrDash(allDurations))));
   rows.push(physRow('Rescue med uses',                 cells.map(c => c.rescueUses || ''),     sum(cells.map(c => c.rescueUses))));
 
@@ -1161,7 +1163,7 @@ async function exportPDF(fromMs, toMs) {
     const tableData = KCCharts.seizureTypesByPeriodTable(seizures, settings, fromMs, toMs, pdfBucket);
     if (tableData.types.length) {
       y = renderSeizureTypesFrequencyTableToPDF(doc, `Seizure types — frequency · ${pdfBucketLabel}`, y, MARGIN, PAGE_W, tableData);
-      y = renderSeizureTypesDurationTableToPDF(doc, `Seizure types — median duration · ${pdfBucketLabel} (mm:ss; * = fewer than 3 events)`, y, MARGIN, PAGE_W, tableData);
+      y = renderSeizureTypesDurationTableToPDF(doc, `Seizure types — duration · ${pdfBucketLabel} (total mm:ss with median in brackets; * = median from fewer than 3 events)`, y, MARGIN, PAGE_W, tableData);
     }
   }
 
@@ -1678,29 +1680,59 @@ function renderSeizureTypesFrequencyTableToPDF(doc, title, y, margin, pageW, tab
 function renderSeizureTypesDurationTableToPDF(doc, title, y, margin, pageW, tableData) {
   if (!tableData || !tableData.types.length) return y;
   const fmt = KCCharts.fmtDurationMmSs;
+  const sumOf = (arr) => arr.reduce((a, b) => a + b, 0);
+  const medianOf = (arr) => {
+    if (!arr.length) return null;
+    const s = arr.slice().sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : (s[mid-1] + s[mid]) / 2;
+  };
+  const cellStr = (durations) => {
+    if (!durations || !durations.length) return '—';
+    const total = sumOf(durations);
+    if (durations.length === 1) return fmt(total);
+    const med = medianOf(durations);
+    return durations.length < 3
+      ? `${fmt(total)} (${fmt(med)}*)`
+      : `${fmt(total)} (${fmt(med)})`;
+  };
+
   const rows = tableData.types.map(t => {
-    const cells = t.cells.map(c => {
-      if (c.count === 0) return '—';
-      if (c.count < 3) {
-        const first = c.durations.length ? fmt(c.durations[0]) : '—';
-        return `${first}*`;
-      }
-      return fmt(c.median);
-    });
-    // "Total" cell for duration row = overall median across the range
-    let totalStr;
-    if (!t.totalDurations.length) {
-      totalStr = '—';
-    } else if (t.totalDurations.length < 3) {
-      totalStr = `${fmt(t.totalDurations[0])}*`;
-    } else {
-      const sorted = t.totalDurations.slice().sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      const med = sorted.length % 2 ? sorted[mid] : (sorted[mid-1] + sorted[mid]) / 2;
-      totalStr = fmt(med);
-    }
+    const cells = t.cells.map(c => (c.count === 0 ? '—' : cellStr(c.durations)));
+    // Right-column Total = per-type total seconds across the whole range
+    const totalStr = t.totalDurations.length ? fmt(sumOf(t.totalDurations)) : '—';
     return { label: t.label, cells, total: totalStr, bold: false };
   });
+
+  // Two summary rows: cross-type Total duration + Median per period.
+  const perBucketDur = tableData.buckets.map((_, i) =>
+    [].concat(...tableData.types.map(t => t.cells[i].durations))
+  );
+  const grandAll = [].concat(...tableData.types.map(t => t.totalDurations));
+
+  rows.push({
+    label: 'Total duration',
+    cells: perBucketDur.map(arr => arr.length ? fmt(sumOf(arr)) : '—'),
+    total: grandAll.length ? fmt(sumOf(grandAll)) : '—',
+    bold: true, isTotals: true
+  });
+  rows.push({
+    label: 'Median per period',
+    cells: perBucketDur.map(arr => {
+      if (!arr.length) return '—';
+      if (arr.length === 1) return fmt(arr[0]);
+      const med = medianOf(arr);
+      return arr.length < 3 ? `${fmt(med)}*` : fmt(med);
+    }),
+    total: (() => {
+      if (!grandAll.length) return '—';
+      if (grandAll.length === 1) return fmt(grandAll[0]);
+      const med = medianOf(grandAll);
+      return grandAll.length < 3 ? `${fmt(med)}*` : fmt(med);
+    })(),
+    bold: true, isTotals: true
+  });
+
   return _renderTypesTableToPDF(doc, title, y, margin, pageW, tableData.buckets, rows);
 }
 

@@ -1336,43 +1336,87 @@ function renderSeizureTypesTable(seizures, settings, fromMs, toMs, bucket, bucke
     </table>
   `;
 
-  // Duration body
+  // Duration body — v1.5 update: each cell shows "total (median*)" where
+  // total is the sum of all event seconds in the bucket and median is the
+  // per-event median. The * follows the median (not the total) and
+  // indicates "fewer than 3 events — interpret the median with care".
+  // The Total column shows the per-type grand total across the whole range.
+  // Two summary rows follow: cross-type Total duration and Median per period.
+  const fmt = KCCharts.fmtDurationMmSs;
+  const sumOf = (arr) => arr.reduce((a, b) => a + b, 0);
+  const medianOf = (arr) => {
+    if (!arr.length) return null;
+    const s = arr.slice().sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : (s[mid-1] + s[mid]) / 2;
+  };
+  const fmtDurationCell = (durations) => {
+    if (!durations || !durations.length) return '—';
+    const total = sumOf(durations);
+    if (durations.length === 1) {
+      return fmt(total);
+    }
+    const med = medianOf(durations);
+    if (durations.length < 3) {
+      return `${fmt(total)} <span class="med-paren">(${fmt(med)}<sup>*</sup>)</span>`;
+    }
+    return `${fmt(total)} <span class="med-paren">(${fmt(med)})</span>`;
+  };
+
   const durBody = table.types.map(t => {
     const cells = t.cells.map((c, i) => {
       const isPartial = table.buckets[i].isPartial;
       const cls = isPartial ? ' partial' : '';
       if (c.count === 0) return `<td class="empty${cls}">—</td>`;
-      if (c.count < 3) {
-        // Show first event's seconds + "*" marker
-        const first = c.durations.length ? KCCharts.fmtDurationMmSs(c.durations[0]) : '—';
-        const tip = c.count === 1
-          ? '1 event — too few for a median'
-          : `${c.count} events — too few for a median`;
-        return `<td class="few-events${cls}" title="${tip}">${first}<sup>*</sup></td>`;
-      }
-      return `<td${cls ? ` class="${cls.trim()}"` : ''}>${KCCharts.fmtDurationMmSs(c.median)}</td>`;
+      return `<td class="dur-cell${cls}">${fmtDurationCell(c.durations)}</td>`;
     }).join('');
-    // "Total" column for duration = median across all events in range (or — if <3)
-    const totalDurations = t.totalDurations;
-    let totalCell;
-    if (!totalDurations.length) {
-      totalCell = '<td class="type-total-col">—</td>';
-    } else if (totalDurations.length < 3) {
-      const first = KCCharts.fmtDurationMmSs(totalDurations[0]);
-      totalCell = `<td class="type-total-col"><strong>${first}<sup>*</sup></strong></td>`;
-    } else {
-      const sorted = totalDurations.slice().sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      const med = sorted.length % 2 ? sorted[mid] : (sorted[mid-1] + sorted[mid]) / 2;
-      totalCell = `<td class="type-total-col"><strong>${KCCharts.fmtDurationMmSs(med)}</strong></td>`;
-    }
+    // Right-column Total = per-type total seconds across the whole range.
+    // Bold so it reads as the "this type's overall load" anchor.
+    const totalCell = t.totalDurations.length
+      ? `<td class="type-total-col"><strong>${fmt(sumOf(t.totalDurations))}</strong></td>`
+      : '<td class="type-total-col">—</td>';
     return `<tr><th class="type-name-col" title="${escapeHtml(t.label)}">${escapeHtml(t.label)}</th>${cells}${totalCell}</tr>`;
   }).join('');
+
+  // Summary rows — cross-type aggregates per bucket.
+  // Bucket-level "all events" durations for each bucket index
+  const perBucketDurations = table.buckets.map((_, i) =>
+    [].concat(...table.types.map(t => t.cells[i].durations))
+  );
+  const grandAll = [].concat(...table.types.map(t => t.totalDurations));
+
+  const totalRowCells = perBucketDurations.map((arr, i) => {
+    const cls = table.buckets[i].isPartial ? ' class="partial"' : '';
+    return `<td${cls}>${arr.length ? fmt(sumOf(arr)) : '—'}</td>`;
+  }).join('');
+  const grandTotalCell = `<td class="type-total-col"><strong>${grandAll.length ? fmt(sumOf(grandAll)) : '—'}</strong></td>`;
+
+  const medianRowCells = perBucketDurations.map((arr, i) => {
+    const cls = table.buckets[i].isPartial ? ' partial' : '';
+    if (!arr.length) return `<td class="empty ${cls}">—</td>`;
+    if (arr.length === 1) return `<td class="${cls}">${fmt(arr[0])}</td>`;
+    const med = medianOf(arr);
+    const star = arr.length < 3 ? '<sup>*</sup>' : '';
+    return `<td class="${cls}">${fmt(med)}${star}</td>`;
+  }).join('');
+  let grandMedianCell;
+  if (!grandAll.length) {
+    grandMedianCell = '<td class="type-total-col">—</td>';
+  } else {
+    const med = medianOf(grandAll);
+    const star = grandAll.length < 3 ? '<sup>*</sup>' : '';
+    grandMedianCell = `<td class="type-total-col"><strong>${fmt(med)}${star}</strong></td>`;
+  }
+
+  const durSummaryRows = `
+    <tr class="summary-row"><th class="type-name-col">Total duration</th>${totalRowCells}${grandTotalCell}</tr>
+    <tr class="summary-row"><th class="type-name-col">Median per period</th>${medianRowCells}${grandMedianCell}</tr>
+  `;
 
   durWrap.innerHTML = `
     <table class="types-table">
       ${headerRow}
-      <tbody>${durBody}</tbody>
+      <tbody>${durBody}${durSummaryRows}</tbody>
     </table>
   `;
 }

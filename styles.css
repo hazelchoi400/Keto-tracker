@@ -1123,6 +1123,38 @@ body::before {
   margin-left: 0.1rem;
 }
 
+/* v1.5 — Duration cells show "total (median*)". The median in brackets is
+   muted so the eye reads total first, then drops to the per-event median.
+   The * follows the median (it's the median that's suspect at n<3, not
+   the total — a sum is honest at any n). */
+.types-table td.dur-cell .med-paren {
+  color: var(--ink-mute);
+  font-size: 0.78rem;
+  margin-left: 0.2rem;
+}
+.types-table td.dur-cell .med-paren sup {
+  color: var(--terracotta);
+  margin-left: 0.05rem;
+}
+
+/* v1.5 — Summary rows beneath the type rows on the Duration table:
+   "Total duration" and "Median per period". Styled as a footer-style
+   group so they read as aggregates, not extra types. */
+.types-table tr.summary-row td,
+.types-table tr.summary-row th {
+  font-style: italic;
+  background: rgba(107, 138, 107, 0.04);
+  color: var(--ink);
+}
+.types-table tr.summary-row:first-of-type td,
+.types-table tr.summary-row:first-of-type th {
+  border-top: 1px solid var(--line);
+}
+.types-table tr.summary-row th.type-name-col {
+  font-style: italic;
+  font-weight: 600;
+}
+
 .types-table tr.totals-row td,
 .types-table tr.totals-row th {
   border-top: 1px solid var(--line);

@@ -538,14 +538,10 @@
     <div class="form">
       <p class="muted">Choose a date range and format. Files will download to your device — share by email, AirDrop, or upload to your dietitian or neurologist.</p>
 
-      <div class="filter-row" id="exportRangeRow">
-        <div class="chip-group" data-field="exportRange">
-          <button type="button" class="chip selected hidden" data-value="kd" id="exportKdChip">Since KD started</button>
-          <button type="button" class="chip" data-value="custom" id="exportCustomChip">Custom</button>
+      <div class="export-range-row" id="exportRangeRow">
+        <div class="export-kd-cell hidden" id="exportKdCell">
+          <button type="button" class="export-kd-btn" id="exportKdChip" title="Fill From with the KD start date and To with today">Since KD</button>
         </div>
-      </div>
-
-      <div class="field-row">
         <div class="field">
           <label>From</label>
           <input type="date" id="exportFrom" />
@@ -776,11 +772,17 @@
       <button type="button" class="btn-ghost" id="showWelcomeAgainBtn">Show welcome screen again</button>
 
       <div class="about-version-block">
-        <p class="about-version muted small">KetoCare · Version 1.5.1</p>
+        <p class="about-version muted small">KetoCare · Version 1.5.2</p>
         <button type="button" class="btn-link about-whatsnew-toggle" id="whatsNewToggle" aria-expanded="false" aria-controls="whatsNewPanel">What's new</button>
       </div>
 
       <div class="whats-new-panel hidden" id="whatsNewPanel" role="region" aria-label="Changelog">
+        <h4 class="whats-new-version">v1.5.2</h4>
+        <ul>
+          <li><strong>Trends and Patterns default to "Since KD"</strong> as soon as you set a KD start date in Settings — no more landing on 1m or 1y by default when KD is set.</li>
+          <li><strong>Export page tightens.</strong> The "Since KD" quick-fill sits inline next to the From and To dates instead of on its own row, so the Restore from backup section stays visible.</li>
+        </ul>
+
         <h4 class="whats-new-version">v1.5.1</h4>
         <ul>
           <li><strong>More reliable updates.</strong> The "Check for updates" button now bypasses the browser's cached service worker file, so it correctly detects new versions on iOS home-screen installs and desktop Chrome — fixing a case where the button reported "you're on the latest" while a new version was actually live.</li>

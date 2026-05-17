@@ -464,6 +464,61 @@ body::before {
 .screen[data-screen="export"] .form .section-heading { margin-top: 0.15rem; }
 .screen[data-screen="export"] .form .muted.small { margin: -0.2rem 0 0; }
 
+/* v1.5.2 — Export range row: From and To side-by-side, with an optional
+   "Since KD" quick-fill button on the left when a KD start date is set.
+   When the chip cell is hidden (no KD start), the layout collapses cleanly
+   to a 2-column From/To row that matches the old export field-row.
+
+   The chip aligns to the bottom of the row so it sits at the same height
+   as the date inputs, despite the chip cell having no label of its own. */
+.export-range-row {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: 0.5rem;
+  align-items: end;
+}
+.export-range-row > .field { min-width: 0; } /* let date inputs shrink */
+.export-kd-cell {
+  display: flex;
+  align-items: flex-end;
+}
+.export-kd-cell.hidden { display: none; }
+
+/* Side-effect: when the chip cell is hidden, From/To still occupy the
+   second and third grid tracks. Force the row back to 1fr 1fr in that case
+   so the inputs split the row evenly like the old layout did. */
+.export-range-row:has(.export-kd-cell.hidden) {
+  grid-template-columns: 1fr 1fr;
+}
+
+.export-kd-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  padding: 0.85rem 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  line-height: 1.1;
+}
+.export-kd-btn:hover {
+  border-color: var(--sage);
+}
+/* "Active" state means the current From/To values match KD-start / today.
+   Sage-tinted so it reads as the loaded preset. */
+.export-kd-btn.active {
+  background: var(--sage-tint);
+  border-color: var(--sage);
+  color: var(--sage-deep);
+  font-weight: 600;
+}
+
 .field label {
   font-size: 0.85rem;
   font-weight: 600;

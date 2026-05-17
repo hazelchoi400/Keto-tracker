@@ -1023,6 +1023,12 @@ function resetPatternsCustomChipLabel()    { resetCustomChipLabel('patterns'); }
 
 /* ---------- Show/hide "Since KD" chip based on whether kdStartDate is set ---------- */
 
+// Tracks whether the KD chip is currently visible. Used to detect the
+// transition from "no KD set" → "KD just set" so we can switch the default
+// range to 'kd' on that moment (but not on every subsequent settings save,
+// which would override a user's explicit chip choice).
+let _kdChipWasVisible = false;
+
 function refreshKdChipVisibility() {
   const kdStart = getKdStartMs(state.settings);
   const hasKd = kdStart != null;
@@ -1030,8 +1036,24 @@ function refreshKdChipVisibility() {
   const patternsKd = document.getElementById('patternsKdChip');
   if (trendKd) trendKd.classList.toggle('hidden', !hasKd);
   if (patternsKd) patternsKd.classList.toggle('hidden', !hasKd);
-  // If KD was just turned off but the active range was 'kd', drop back to 1m / 1y.
-  if (!hasKd) {
+
+  // v1.5.2 — Transition handling.
+  //
+  // KD just BECAME available (off → on): bump the active range on Trends
+  // and Patterns to 'kd' so the user lands on the most useful view next
+  // time they open those screens. Only triggers on the off→on edge so a
+  // user who has explicitly chosen "1m" or similar doesn't get
+  // overridden every time they save Settings.
+  //
+  // KD just BECAME unavailable (on → off): drop any 'kd' selection back
+  // to the v1.4-style defaults so we don't have a selected chip pointing
+  // at nothing.
+  if (hasKd && !_kdChipWasVisible) {
+    state.selectedTrendRange = 'kd';
+    state.selectedPatternsRange = 'kd';
+    syncRangeChipSelection('trendRange', 'kd');
+    syncRangeChipSelection('patternsRange', 'kd');
+  } else if (!hasKd) {
     if (state.selectedTrendRange === 'kd') {
       state.selectedTrendRange = 30;
       syncRangeChipSelection('trendRange', 30);
@@ -1041,6 +1063,7 @@ function refreshKdChipVisibility() {
       syncRangeChipSelection('patternsRange', 365);
     }
   }
+  _kdChipWasVisible = hasKd;
 }
 
 // Mark the chip matching `value` as selected in the named chip group; clear
@@ -1436,70 +1459,76 @@ function initExportScreen() {
   };
   const fromEl = document.getElementById('exportFrom');
   const toEl = document.getElementById('exportTo');
+  const kdCell = document.getElementById('exportKdCell');
   const kdChip = document.getElementById('exportKdChip');
-  const customChip = document.getElementById('exportCustomChip');
-  const rangeRow = document.getElementById('exportRangeRow');
 
   const kdStart = getKdStartMs(state.settings);
 
-  // v1.5 — Two-chip range selector at the top of the Export screen:
-  //   Since KD started · Custom
-  // Default = "Since KD started" when a start date is set (the common case
-  // for clinic prep). Hides the chip row entirely if there's no KD start
-  // date — the page falls back to the v1.4 layout in that case.
-  if (kdStart != null) {
-    if (rangeRow) rangeRow.classList.remove('hidden');
-    if (kdChip) kdChip.classList.remove('hidden');
-    // Auto-fill the pickers from the KD start date → today every time the
-    // screen is opened, so an export taken next month covers up-to-date.
-    // Skip the auto-fill if Custom is currently selected (so the user's
-    // hand-picked dates aren't overwritten).
-    const customSelected = customChip && customChip.classList.contains('selected');
-    if (!customSelected) {
+  // v1.5.2 — Export range row is one row of three cells: [Since KD button]
+  // [From input] [To input]. The Since-KD cell is hidden when no KD start
+  // date is set, and the row collapses to a normal 2-column field-row in
+  // that case (handled in CSS with :has()).
+  //
+  // The Since-KD button is a quick-fill, not a stateful chip — tapping it
+  // fills From with the KD start date and To with today. The button picks
+  // up an "active" visual state when the loaded values match those exact
+  // dates, so the user can see at a glance that the preset is loaded. The
+  // moment the user manually edits either date, the active state clears.
+
+  if (kdStart != null && kdCell) kdCell.classList.remove('hidden');
+  else if (kdCell) kdCell.classList.add('hidden');
+
+  // Default fill — fresh visit to the Export screen
+  if (!fromEl.value) {
+    if (kdStart != null) {
       fromEl.value = state.settings.kdStartDate;
-      toEl.value = fmt(today);
-      fromEl.disabled = true;
-      toEl.disabled = true;
-      if (kdChip) kdChip.classList.add('selected');
-      if (customChip) customChip.classList.remove('selected');
-    }
-  } else {
-    // No KD start date — fall back to v1.4 behaviour: hide chip row,
-    // default to last 30 days.
-    if (rangeRow) rangeRow.classList.add('hidden');
-    if (!fromEl.value) {
+    } else {
       const monthAgo = new Date(today.getTime() - 30*86400000);
       fromEl.value = fmt(monthAgo);
     }
-    if (!toEl.value) toEl.value = fmt(today);
-    fromEl.disabled = false;
-    toEl.disabled = false;
   }
+  if (!toEl.value) toEl.value = fmt(today);
+
+  // Both pickers always enabled — Since-KD doesn't lock anything
+  fromEl.disabled = false;
+  toEl.disabled = false;
+
+  refreshExportKdActiveState();
 }
 
-// v1.5 — Export-range chip click handler. Wired up at app init.
-function handleExportRangeChipClick(value) {
+// Mark the Since-KD button as "active" when the loaded From/To values
+// match its preset (KD start → today). Clears otherwise.
+function refreshExportKdActiveState() {
+  const kdChip = document.getElementById('exportKdChip');
+  if (!kdChip) return;
+  const kdStart = getKdStartMs(state.settings);
+  if (kdStart == null) {
+    kdChip.classList.remove('active');
+    return;
+  }
+  const fromEl = document.getElementById('exportFrom');
+  const toEl = document.getElementById('exportTo');
+  if (!fromEl || !toEl) return;
+  const todayISO = (() => {
+    const d = new Date();
+    const pad = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  })();
+  const isActive = fromEl.value === state.settings.kdStartDate && toEl.value === todayISO;
+  kdChip.classList.toggle('active', isActive);
+}
+
+// Quick-fill From with KD start, To with today.
+function handleExportKdClick() {
+  const kdStart = getKdStartMs(state.settings);
+  if (kdStart == null) return;
   const fromEl = document.getElementById('exportFrom');
   const toEl = document.getElementById('exportTo');
   const today = new Date();
-  const fmt = (d) => {
-    const pad = n => String(n).padStart(2,'0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-  };
-  if (value === 'kd') {
-    const kdStart = getKdStartMs(state.settings);
-    if (kdStart != null) {
-      fromEl.value = state.settings.kdStartDate;
-      toEl.value = fmt(today);
-    }
-    fromEl.disabled = true;
-    toEl.disabled = true;
-  } else {
-    // Custom — enable pickers. Don't reset values; the user can fine-tune
-    // whatever's currently shown.
-    fromEl.disabled = false;
-    toEl.disabled = false;
-  }
+  const pad = n => String(n).padStart(2,'0');
+  fromEl.value = state.settings.kdStartDate;
+  toEl.value = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+  refreshExportKdActiveState();
 }
 
 function getExportRange() {
@@ -1597,7 +1626,7 @@ async function handleSettingsSubmit(e) {
 // Single source of truth for the version label shown in-app. Keep in
 // sync with CACHE_NAME in sw.js. The "Check for updates" button compares
 // against this to decide what to tell the user.
-const APP_VERSION = 'v1.5.1';
+const APP_VERSION = 'v1.5.2';
 
 // Captured by registerServiceWorker() so the button has a reference.
 let _swRegistration = null;
@@ -1755,17 +1784,11 @@ async function handleImportFile(e) {
 document.addEventListener('DOMContentLoaded', async () => {
   state.settings = await KCDB.getSettings();
 
-  // v1.5 — Show/hide the "Since KD" chip; if a start date is set, make that
-  // the default range on both Trends and Patterns so the user lands on the
-  // most useful view for clinic prep without needing to tap.
+  // v1.5.2 — refreshKdChipVisibility handles both showing the "Since KD" chip
+  // and setting the default range to 'kd' on the off→on transition (which
+  // includes initial load when KD is already set). No further bootstrap
+  // is needed here.
   refreshKdChipVisibility();
-  if (getKdStartMs(state.settings) != null) {
-    state.selectedTrendRange = 'kd';
-    state.selectedPatternsRange = 'kd';
-  }
-  // Reflect state on the chip group selections.
-  syncRangeChipSelection('trendRange', state.selectedTrendRange);
-  syncRangeChipSelection('patternsRange', state.selectedPatternsRange);
 
   // First-time launch: show Welcome screen (replaces the old toast nudge)
   if (!state.settings.welcomeDismissed) {
@@ -1877,8 +1900,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   wireCustomPicker('trend',    'trendCustomApply',    'trendCustomCancel');
   wireCustomPicker('patterns', 'patternsCustomApply', 'patternsCustomCancel');
 
-  // v1.5 — Export range chip group (Since KD started · Custom)
-  setupChipGroup('exportRange', false, handleExportRangeChipClick);
+  // v1.5.2 — Export Since-KD quick-fill button + date input listeners.
+  // The button fills From/To with KD-start / today. The input listeners
+  // clear the button's "active" sage tint as soon as either date changes.
+  const exportKdBtn = document.getElementById('exportKdChip');
+  if (exportKdBtn) exportKdBtn.addEventListener('click', handleExportKdClick);
+  const exportFromEl = document.getElementById('exportFrom');
+  const exportToEl   = document.getElementById('exportTo');
+  if (exportFromEl) exportFromEl.addEventListener('change', refreshExportKdActiveState);
+  if (exportToEl)   exportToEl.addEventListener('change',   refreshExportKdActiveState);
 
   // Settings
   setupChipGroup('settingVariant', false, (v) => {

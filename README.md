@@ -2,7 +2,7 @@
 
 A paediatric ketogenic diet tracker for parents of children with epilepsy. Logs ketones, glucose, GKI, and seizures with timing detail. Generates clinic-ready PDF summaries and an Excel workbook designed around the month-as-column view that clinicians already use.
 
-Current version: **v1.5.1**.
+Current version: **v1.5.2**.
 
 ## Deploy to GitHub Pages
 

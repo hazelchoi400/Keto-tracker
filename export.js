@@ -52,9 +52,10 @@ async function exportXLSX(fromMs, toMs) {
   // Tab order is deliberate: ReadMe first so anyone receiving the file
   // cold knows what they're looking at; then Summary (highest level);
   // then Monthly (v1.5: the parent's-spreadsheet view — types as rows,
-  // months as columns); then Daily (day-by-day); then the long-format
-  // tabs that most cross-sheet analysis joins on; then Patterns data
-  // (v1.3) for any clinician wanting the in-app Patterns views as cells.
+  // months as columns, with physiology, type frequency, type total &
+  // median durations, hour-of-day, day-of-week, and triggers chunks);
+  // then Daily (day-by-day); then the long-format tabs for cross-sheet
+  // analysis.
 
   // ---------- Tab 1: ReadMe (v1.3) ----------
   const readMeSheet = buildReadMeSheet(settings, fromMs, toMs, measurements.length, seizures.length);
@@ -87,14 +88,10 @@ async function exportXLSX(fromMs, toMs) {
   const detailSheet = buildDailyDetailSheet(measurements, seizures, settings);
   XLSX.utils.book_append_sheet(wb, detailSheet, 'Daily detail');
 
-  // ---------- Tab 8: Patterns data (v1.3) ----------
-  // Mirrors the in-app Patterns screen as plain cells — no images.
-  // Includes AM/PM stats, type counts, per-type weekly counts and
-  // median durations, hour-of-day histogram, day-of-week histogram,
-  // triggers tally. Bucketing for the per-type matrices is auto-picked
-  // from the export range length to match the in-app rules.
-  const patternsSheet = buildPatternsSheet(settings, measurements, seizures, fromMs, toMs);
-  XLSX.utils.book_append_sheet(wb, patternsSheet, 'Patterns data');
+  // v1.5: the standalone "Patterns data" tab was removed. Its content
+  // (AM/PM stats, type counts, hour-of-day, day-of-week, triggers tally)
+  // is now folded into the Monthly tab as numbered chunks so a clinician
+  // reads everything in one place rather than tab-hopping.
 
   const filename = `ketocare_${(settings.childName || 'export').replace(/\s+/g,'_').toLowerCase()}_${fmtDateISO(fromMs)}_to_${fmtDateISO(toMs)}_full.xlsx`;
   XLSX.writeFile(wb, filename);
@@ -220,13 +217,24 @@ function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
     return -1;
   };
 
-  // Per-bucket means + counts
+  // Per-bucket means + counts. v1.5 — extended to also collect, per bucket:
+  //   hourCounts[24]   — seizure counts by hour of day
+  //   dowCounts[7]     — seizure counts by day of week (Mon..Sun)
+  //   triggerCounts{}  — map of trigger label → count
+  //   noTriggerCount   — seizures in this bucket with no trigger noted
   const cells = buckets.map(() => ({
     ketoneAM: [], ketonePM: [], glucose: [], gki: [],
-    readings: 0, seizureFreeDays: 0, rescueUses: 0, durations: []
+    readings: 0, seizureFreeDays: 0, rescueUses: 0, durations: [],
+    hourCounts: new Array(24).fill(0),
+    dowCounts:  new Array(7).fill(0),
+    triggerCounts: {},
+    noTriggerCount: 0
   }));
   // Track unique seizure-days per bucket
   const seizureDaysByBucket = buckets.map(() => new Set());
+  // Collect the set of all trigger labels seen across the whole range (so we
+  // build one row per trigger in chunk 7, in descending-total order).
+  const allTriggerTotals = {};
 
   const morningEnd = KCCharts.MORNING_END_HOUR;
 
@@ -248,8 +256,25 @@ function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
     if (i < 0) continue;
     if (s.durationSec != null && !isNaN(s.durationSec)) cells[i].durations.push(s.durationSec);
     if (s.rescueMed && s.rescueMed.trim()) cells[i].rescueUses++;
-    const dayKey = new Date(s.startTime).toDateString();
+    const d = new Date(s.startTime);
+    const dayKey = d.toDateString();
     seizureDaysByBucket[i].add(dayKey);
+    // Hour 0..23
+    cells[i].hourCounts[d.getHours()]++;
+    // Day-of-week as Mon=0 .. Sun=6 (matches the in-app heatmap order)
+    cells[i].dowCounts[(d.getDay() + 6) % 7]++;
+    // Triggers — capitalised first letter to match in-app rendering
+    const triggers = (s.triggers || []).filter(Boolean);
+    if (triggers.length) {
+      for (const t of triggers) {
+        const label = String(t).replace(/-/g, ' ');
+        const display = label.charAt(0).toUpperCase() + label.slice(1);
+        cells[i].triggerCounts[display] = (cells[i].triggerCounts[display] || 0) + 1;
+        allTriggerTotals[display] = (allTriggerTotals[display] || 0) + 1;
+      }
+    } else {
+      cells[i].noTriggerCount++;
+    }
   }
 
   // Compute seizure-free days per bucket = days in bucket − unique seizure days
@@ -286,11 +311,15 @@ function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
   rows.push(['', ...bucketLabels, 'Total']);
 
   /* ============================================================
-     v1.5 layout — four content chunks separated by blank rows:
+     v1.5 layout — content chunks separated by blank rows, each with
+     a heading row so readers know what they're looking at:
        1. Physiology means (ketone AM/PM, glucose, GKI, readings)
        2. Seizure types — frequency
        3. Seizure types — total duration (mm:ss)
        4. Seizure types — median duration (mm:ss)
+       5. Seizures by hour of day
+       6. Seizures by day of week
+       7. Triggers tally
      Then an outcome block (seizure-free days, rescue med uses) at
      the bottom, then a notes block.
      ============================================================ */
@@ -313,6 +342,7 @@ function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
   const allDurations = [].concat(...cells.map(c => c.durations));
 
   /* ---------- Chunk 1: physiology ---------- */
+  rows.push(['Physiology — means per period']);
   rows.push(physRow('Mean blood ketone — AM (mmol/L)', cells.map(c => meanOrDash(c.ketoneAM)),  meanOrDash(allKetoneAM)));
   rows.push(physRow('Mean blood ketone — PM (mmol/L)', cells.map(c => meanOrDash(c.ketonePM)),  meanOrDash(allKetonePM)));
   rows.push(physRow('Mean glucose (mmol/L)',           cells.map(c => meanOrDash(c.glucose)),   meanOrDash(allGlucose)));
@@ -321,6 +351,7 @@ function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
   rows.push([]); // blank
 
   /* ---------- Chunk 2: seizure types — frequency ---------- */
+  rows.push(['Seizure types — frequency (count per period)']);
   if (typesTable.types.length) {
     for (const t of typesTable.types) {
       rows.push(physRow(t.label, t.cells.map(c => c.count > 0 ? c.count : ''), t.totalCount));
@@ -337,6 +368,7 @@ function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
   rows.push([]); // blank
 
   /* ---------- Chunk 3: seizure types — total duration ---------- */
+  rows.push(['Seizure types — total duration (mm:ss per period)']);
   if (typesTable.types.length) {
     let anyDuration = false;
     for (const t of typesTable.types) {
@@ -364,6 +396,7 @@ function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
   rows.push([]); // blank
 
   /* ---------- Chunk 4: seizure types — median duration ---------- */
+  rows.push(['Seizure types — median duration (mm:ss per period; * = median from fewer than 3 events)']);
   if (typesTable.types.length) {
     for (const t of typesTable.types) {
       // Per-bucket median, with "*" annotation if n<3 (matches in-app convention).
@@ -403,6 +436,51 @@ function buildPeriodicSheet(settings, measurements, seizures, fromMs, toMs) {
       }
     }
     rows.push(physRow('Median seizure duration (mm:ss)', medianRowVals, grandMedian));
+  }
+  rows.push([]); // blank
+
+  /* ---------- Chunk 5: seizures by hour of day ---------- */
+  rows.push(['Seizures by hour of day']);
+  // 24 rows, one per hour. Labels are HH:00 — HH:59 style for clarity.
+  // Blank cells where no seizures happened in that hour for that bucket.
+  for (let h = 0; h < 24; h++) {
+    const perBucket = cells.map(c => c.hourCounts[h] > 0 ? c.hourCounts[h] : '');
+    const total = sum(cells.map(c => c.hourCounts[h]));
+    const label = `${String(h).padStart(2, '0')}:00`;
+    rows.push(physRow(label, perBucket, total > 0 ? total : ''));
+  }
+  rows.push([]); // blank
+
+  /* ---------- Chunk 6: seizures by day of week ---------- */
+  rows.push(['Seizures by day of week']);
+  const dowLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  for (let d = 0; d < 7; d++) {
+    const perBucket = cells.map(c => c.dowCounts[d] > 0 ? c.dowCounts[d] : '');
+    const total = sum(cells.map(c => c.dowCounts[d]));
+    rows.push(physRow(dowLabels[d], perBucket, total > 0 ? total : ''));
+  }
+  rows.push([]); // blank
+
+  /* ---------- Chunk 7: triggers tally ---------- */
+  rows.push(['Triggers tally — number of seizures with each trigger noted']);
+  // Build the trigger row order: descending by overall total, then
+  // "No trigger noted" appended at the bottom so the denominator is visible.
+  const triggerLabels = Object.entries(allTriggerTotals)
+    .sort(([, a], [, b]) => b - a)
+    .map(([label]) => label);
+  if (triggerLabels.length || seizures.length) {
+    for (const label of triggerLabels) {
+      const perBucket = cells.map(c => c.triggerCounts[label] > 0 ? c.triggerCounts[label] : '');
+      const total = sum(cells.map(c => c.triggerCounts[label] || 0));
+      rows.push(physRow(label, perBucket, total));
+    }
+    const noTrigPerBucket = cells.map(c => c.noTriggerCount > 0 ? c.noTriggerCount : '');
+    const noTrigTotal = sum(cells.map(c => c.noTriggerCount));
+    if (noTrigTotal > 0 || triggerLabels.length === 0) {
+      rows.push(physRow('No trigger noted', noTrigPerBucket, noTrigTotal > 0 ? noTrigTotal : ''));
+    }
+  } else {
+    rows.push(['(no seizures logged in this period)']);
   }
   rows.push([]); // blank
 
@@ -630,9 +708,19 @@ function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
     ['Tabs'],
     ['  ReadMe        — this page.'],
     ['  Summary       — overview of the period at a glance.'],
-    ['  Monthly       — types as rows, time periods (e.g. months) as columns,'],
-    ['                  totals on the right. The view clinicians find easiest'],
-    ['                  to read for "what changed across the year".'],
+    ['  Monthly       — the main clinic-prep view. Time periods (e.g.'],
+    ['                  months) as columns, totals on the right. Seven'],
+    ['                  content chunks:'],
+    ['                    1. Physiology — means per period (ketone AM/PM,'],
+    ['                       glucose, GKI, readings logged).'],
+    ['                    2. Seizure types — frequency.'],
+    ['                    3. Seizure types — total duration.'],
+    ['                    4. Seizure types — median duration.'],
+    ['                    5. Seizures by hour of day.'],
+    ['                    6. Seizures by day of week.'],
+    ['                    7. Triggers tally.'],
+    ['                  Plus seizure-free days, rescue med uses, and an'],
+    ['                  empty Notes block at the bottom.'],
     ['  Daily         — one row per day. Best place to spot day-to-day variation.'],
     ['  Measurements  — every ketone/glucose reading recorded (long format).'],
     ['  Seizures      — every seizure recorded, with the closest ketone'],
@@ -640,10 +728,6 @@ function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
     ['  Daily detail  — long-format interleave of measurements and seizures'],
     ['                  in chronological order, one row each, with a'],
     ['                  record_type column. Useful for pivot tables.'],
-    ['  Patterns data — the same views shown on the in-app Patterns screen,'],
-    ['                  as plain cells. AM/PM stats, type counts, per-type'],
-    ['                  counts and median durations, hour-of-day histogram,'],
-    ['                  day-of-week histogram, triggers tally.'],
     [''],
     ['How the tabs link'],
     ['  Every event/measurement/daily row has a "Date" column in ISO'],
@@ -668,16 +752,18 @@ function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
     ['    side of each seizure. The hours-gap column tells you how close'],
     ['    in time that reading was.'],
     ['  • The "In target" columns use the target range set by the family'],
-    ['    in the app settings (typically agreed with their dietitian).'],
-    ['  • Time-bucketed views (the Monthly and Patterns data tabs) auto-pick'],
-    ['    the bucket type from the export range length:'],
+    ['    in the app settings (set by your ketogenic diet centre).'],
+    ['  • The Monthly tab auto-picks the bucket type from the export range:'],
     ['      ≤7 days   — daily'],
     ['      8–60 days — calendar weeks (Mon–Sun)'],
     ['      >60 days  — calendar months (e.g. Apr 23, May 23, …)'],
     ['    The first and last buckets may be partial — for example, when'],
     ['    the range starts mid-month, the first column is labelled with'],
     ['    "(from N)" to make that visible.'],
-    ['  • Patterns data is descriptive only. No correlations are calculated.'],
+    ['  • In the median duration chunk, a "*" suffix means "fewer than 3'],
+    ['    events in this period — treat the median with care".'],
+    ['  • All Monthly views are descriptive only. No correlations are'],
+    ['    calculated.'],
     [''],
     ['Export details'],
     ['  Child name      ' + (settings.childName || '—')],
@@ -688,7 +774,7 @@ function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
     ['  Period          ' + fmtDateUK(fromMs) + ' to ' + fmtDateUK(toMs)],
     ['  Records         ' + nMeas + ' measurements, ' + nSeiz + ' seizures'],
     ['  Generated       ' + new Date().toLocaleString('en-GB')],
-    ['  App version     v1.5']
+    ['  App version     v1.5.1']
   ];
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = [{ wch: 78 }];
@@ -800,179 +886,6 @@ function buildDailyDetailSheet(measurements, seizures, settings) {
   return ws;
 }
 
-/**
- * v1.3 — Patterns data tab. Mirrors the in-app Patterns screen as plain
- * cells. No images, no charts. Anyone who wants a chart can highlight a
- * range and Insert → Chart in Excel themselves.
- *
- * Bucketing for per-type matrices auto-picks from the export range to
- * match in-app rules:
- *   ≤21d    → weekly
- *   22–120d → monthly
- *   >120d   → quarterly
- *
- * Sections (separated by blank rows):
- *   1. AM/PM stats table (Ketone, Glucose, GKI: min/max/mean/median/n × AM/PM)
- *   2. Seizures-by-type counts
- *   3. Per-type counts by bucket (one row per type, columns = bucket starts)
- *   4. Per-type median duration by bucket (seconds)
- *   5. Seizures by hour of day (0–23)
- *   6. Seizures by day of week (Mon–Sun)
- *   7. Triggers tally
- */
-function buildPatternsSheet(settings, measurements, seizures, fromMs, toMs) {
-  const MORNING_END = KCCharts.MORNING_END_HOUR;
-  const isMorning = (ts) => new Date(ts).getHours() < MORNING_END;
-  const rows = [];
-
-  // Header
-  rows.push(['Patterns data']);
-  rows.push(['Period', fmtDateUK(fromMs) + ' to ' + fmtDateUK(toMs)]);
-  rows.push(['Source', 'KetoCare in-app Patterns view, exported as cells']);
-  rows.push(['Note',   'Descriptive only — no correlations or predictions calculated.']);
-  rows.push([]);
-
-  /* ---------- 1. AM/PM stats ---------- */
-  const amM = measurements.filter(m => isMorning(m.timestamp));
-  const pmM = measurements.filter(m => !isMorning(m.timestamp));
-  const vals = (records, key) => records
-    .filter(m => m[key] != null && !isNaN(m[key])).map(m => m[key]);
-  const valsGKI = (records) => records
-    .filter(m => m.bloodKetone && m.glucose && m.bloodKetone > 0)
-    .map(m => m.glucose / m.bloodKetone);
-
-  // Local stats helper that returns numbers (not pre-formatted strings
-  // like KCCharts.computeStats does) so the cells stay numeric.
-  const stats = (xs) => {
-    if (!xs.length) return { min: '', max: '', mean: '', median: '', count: 0 };
-    const sorted = xs.slice().sort((a, b) => a - b);
-    const sum = xs.reduce((a, b) => a + b, 0);
-    const mid = Math.floor(sorted.length / 2);
-    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-    return {
-      min: round2(sorted[0]),
-      max: round2(sorted[sorted.length - 1]),
-      mean: round2(sum / xs.length),
-      median: round2(median),
-      count: xs.length
-    };
-  };
-
-  const metrics = [
-    { name: 'Ketone (mmol/L)',  am: stats(vals(amM, 'bloodKetone')), pm: stats(vals(pmM, 'bloodKetone')) },
-    { name: 'Glucose (mmol/L)', am: stats(vals(amM, 'glucose')),     pm: stats(vals(pmM, 'glucose')) },
-    { name: 'GKI',              am: stats(valsGKI(amM)),             pm: stats(valsGKI(pmM)) }
-  ];
-
-  rows.push(['AM/PM split stats']);
-  rows.push(['Metric', 'AM min', 'AM max', 'AM mean', 'AM median', 'AM n', 'PM min', 'PM max', 'PM mean', 'PM median', 'PM n']);
-  for (const m of metrics) {
-    rows.push([
-      m.name,
-      m.am.min, m.am.max, m.am.mean, m.am.median, m.am.count,
-      m.pm.min, m.pm.max, m.pm.mean, m.pm.median, m.pm.count
-    ]);
-  }
-  const amSeiz = seizures.filter(s => isMorning(s.startTime)).length;
-  const pmSeiz = seizures.filter(s => !isMorning(s.startTime)).length;
-  rows.push(['Seizures (total)', amSeiz, '', '', '', '', pmSeiz, '', '', '', '']);
-  rows.push([]);
-
-  /* ---------- 2. Seizures-by-type counts ---------- */
-  rows.push(['Seizures by type']);
-  rows.push(['Type', 'Count']);
-  const typeCounts = KCCharts.seizureTypeCounts(seizures, settings);
-  for (const c of typeCounts) rows.push([c.label, c.count]);
-  if (typeCounts.length) {
-    rows.push(['Total events', typeCounts.reduce((a, c) => a + c.count, 0)]);
-  } else {
-    rows.push(['(no seizures in period)']);
-  }
-  rows.push([]);
-
-  /* ---------- 3 + 4. Per-type counts and median durations by bucket ---------- */
-  // v1.5 — switch to calendar-anchored buckets matching the in-app Patterns
-  // and the new Monthly tab. ≤7d daily / 8–60d weekly / >60d monthly.
-  const rangeDays = Math.ceil((toMs - fromMs) / 86400000);
-  const { bucket, label: bucketLabelShort } = KCCharts.autoBucketForDays(rangeDays);
-  const bucketLabel = bucket === 'day' ? 'Daily buckets'
-    : bucket === 'calendar-week' ? 'Calendar weeks (Mon–Sun; first/last may be partial)'
-    : 'Calendar months (Jan, Feb, …; first/last may be partial)';
-
-  const typesTable = KCCharts.seizureTypesByPeriodTable(seizures, settings, fromMs, toMs, bucket);
-
-  rows.push(['Per-type frequency over time']);
-  rows.push([bucketLabel]);
-  if (!typesTable.types.length) {
-    rows.push(['(no seizures in period)']);
-  } else {
-    const bucketLabels = typesTable.buckets.map(b => b.label);
-    rows.push(['Type', ...bucketLabels, 'Total']);
-    for (const t of typesTable.types) {
-      rows.push([t.label, ...t.cells.map(c => c.count), t.totalCount]);
-    }
-  }
-  rows.push([]);
-
-  rows.push(['Per-type median duration (seconds) over time']);
-  rows.push(['Buckets where n<3, median is left blank (too few events for a meaningful average; see Seizures tab for individual durations).']);
-  if (!typesTable.types.length) {
-    rows.push(['(no timed seizures in period)']);
-  } else {
-    const bucketLabels = typesTable.buckets.map(b => b.label);
-    rows.push(['Type', ...bucketLabels, 'Total timed events']);
-    for (const t of typesTable.types) {
-      const cells = t.cells.map(c => (c.count >= 3 && c.median != null) ? Math.round(c.median) : '');
-      rows.push([t.label, ...cells, t.totalDurations.length]);
-    }
-  }
-  rows.push([]);
-
-  /* ---------- 5. Hour of day ---------- */
-  rows.push(['Seizures by hour of day']);
-  rows.push(['Hour', 'Count']);
-  const hourSeries = KCCharts.seizuresByHour(seizures);
-  for (let h = 0; h < 24; h++) {
-    rows.push([h, hourSeries.data[h] || 0]);
-  }
-  rows.push([]);
-
-  /* ---------- 6. Day of week ---------- */
-  rows.push(['Seizures by day of week']);
-  rows.push(['Day', 'Count']);
-  const dayCounts = [0, 0, 0, 0, 0, 0, 0]; // Mon..Sun
-  for (const s of seizures) {
-    // JS Date.getDay(): 0=Sun..6=Sat. Re-map to 0=Mon..6=Sun.
-    const dow = (new Date(s.startTime).getDay() + 6) % 7;
-    dayCounts[dow]++;
-  }
-  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  for (let i = 0; i < 7; i++) rows.push([dayNames[i], dayCounts[i]]);
-  rows.push([]);
-
-  /* ---------- 7. Triggers ---------- */
-  rows.push(['Triggers tally']);
-  rows.push(['Trigger', 'Count']);
-  const triggerData = KCCharts.triggerCounts(seizures);
-  if (triggerData.items.length) {
-    for (const t of triggerData.items) rows.push([t.label, t.count]);
-  } else {
-    rows.push(['(no triggers logged)']);
-  }
-  rows.push([]);
-  rows.push(['Total seizures with at least one trigger logged',
-             triggerData.seizuresWithTrigger, 'of', triggerData.totalSeizures]);
-
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  // Generous first column for section headings and type labels; rest fit
-  // small numeric values. The columns we use vary by section but a single
-  // sensible default is fine.
-  ws['!cols'] = [
-    { wch: 36 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
-    { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }
-  ];
-  return ws;
-}
 
 /* ---------- formatting helpers ---------- */
 

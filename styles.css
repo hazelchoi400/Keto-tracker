@@ -1275,6 +1275,21 @@ body::before {
   text-decoration: none;
 }
 
+/* v1.5.1 — Force refresh sits next to Check for updates as a secondary
+   escape hatch. Slightly muted further (no underline by default) so it
+   doesn't compete visually with the primary check button. The separator
+   dot keeps the row reading as one footer rather than two buttons. */
+.home-version-footer .home-version-sep {
+  color: var(--ink-mute);
+  opacity: 0.6;
+}
+.home-version-footer .home-version-force {
+  text-decoration: none;
+}
+.home-version-footer .home-version-force:hover {
+  text-decoration: underline;
+}
+
 .about-version-block {
   display: flex;
   align-items: baseline;

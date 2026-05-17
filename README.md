@@ -2,7 +2,7 @@
 
 A paediatric ketogenic diet tracker for parents of children with epilepsy. Logs ketones, glucose, GKI, and seizures with timing detail. Generates clinic-ready PDF summaries and an Excel workbook designed around the month-as-column view that clinicians already use.
 
-Current version: **v1.5**.
+Current version: **v1.5.1**.
 
 ## Deploy to GitHub Pages
 
@@ -98,7 +98,7 @@ Accessed via "Look for patterns →" link at the bottom of Trends.
 - Multi-child support (schema is ready — just needs a child picker)
 - Meal/ratio logging
 - Photo attachments for ketone strips, food, etc.
-- Direct secure sharing to dietitian (vs email/AirDrop the export)
+- Direct secure sharing to dietitian or neurologist (vs email/AirDrop the export)
 - Bluetooth ketone meter integration
 - Reminder notifications (would need Push API + server, or a native app wrapper)
 - Ketone-band binning of seizure rate (apophenia + denominator + matching + sample-size problems — see PROJECT_CONTEXT)

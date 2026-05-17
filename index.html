@@ -112,6 +112,8 @@
     <div class="home-version-footer">
       <span>Running <strong id="homeVersionLabel">—</strong></span>
       <button type="button" class="home-version-check" id="checkForUpdatesBtn">Check for updates</button>
+      <span class="home-version-sep" aria-hidden="true">·</span>
+      <button type="button" class="home-version-check home-version-force" id="forceRefreshBtn" title="Reset app files and reload (your records are kept)">Force refresh</button>
     </div>
 
     <nav class="bottom-nav">
@@ -534,7 +536,14 @@
     </header>
 
     <div class="form">
-      <p class="muted">Choose a date range and format. Files will download to your device — share by email, AirDrop, or upload to your dietitian.</p>
+      <p class="muted">Choose a date range and format. Files will download to your device — share by email, AirDrop, or upload to your dietitian or neurologist.</p>
+
+      <div class="filter-row" id="exportRangeRow">
+        <div class="chip-group" data-field="exportRange">
+          <button type="button" class="chip selected hidden" data-value="kd" id="exportKdChip">Since KD started</button>
+          <button type="button" class="chip" data-value="custom" id="exportCustomChip">Custom</button>
+        </div>
+      </div>
 
       <div class="field-row">
         <div class="field">
@@ -729,11 +738,11 @@
       <p class="about-subhead"><strong>History and trends</strong></p>
       <p><em>History</em> shows everything you've logged, day by day. Tap any entry to edit it. <em>Trends</em> shows charts and statistics — daily for short ranges, weekly for a month or two, and monthly for longer periods. From there, <em>Patterns</em> goes deeper, including a type-by-month table of seizures.</p>
 
-      <p class="about-subhead"><strong>Sharing with your dietitian</strong></p>
+      <p class="about-subhead"><strong>Sharing with your dietitian or neurologist</strong></p>
       <p><em>Export</em> lets you download a Summary report (PDF, good for clinic) or Detailed records (spreadsheet, good for closer review). You can email these or share them however you'd normally share documents.</p>
 
       <p class="about-subhead"><strong>Settings</strong></p>
-      <p>Set your child's name, target ranges, and alert thresholds in Settings. These are usually agreed with your dietitian. KetoCare doesn't send reminder notifications — browsers can't reliably wake the app in the background, so most parents set a phone alarm for ketone checks.</p>
+      <p>Set your child's name, target ranges, and alert thresholds in Settings. These are usually set by your ketogenic diet centre. KetoCare doesn't send reminder notifications — browsers can't reliably wake the app in the background, so most parents set a phone alarm for ketone checks.</p>
 
       <h3 class="about-section-title">In an emergency</h3>
       <p>Follow your child's emergency care plan. If you don't have one, or you're unsure what to do, contact your local emergency services straight away.</p>
@@ -760,18 +769,25 @@
       </div>
 
       <h3 class="about-section-title">Feedback</h3>
-      <p>If you spot a problem or have a suggestion, please let your dietitian know — they may be able to pass it on.</p>
+      <p>If you spot a problem or have a suggestion, please let your dietitian or neurologist know — they may be able to pass it on.</p>
 
       <div class="divider"></div>
 
       <button type="button" class="btn-ghost" id="showWelcomeAgainBtn">Show welcome screen again</button>
 
       <div class="about-version-block">
-        <p class="about-version muted small">KetoCare · Version 1.5</p>
+        <p class="about-version muted small">KetoCare · Version 1.5.1</p>
         <button type="button" class="btn-link about-whatsnew-toggle" id="whatsNewToggle" aria-expanded="false" aria-controls="whatsNewPanel">What's new</button>
       </div>
 
       <div class="whats-new-panel hidden" id="whatsNewPanel" role="region" aria-label="Changelog">
+        <h4 class="whats-new-version">v1.5.1</h4>
+        <ul>
+          <li><strong>More reliable updates.</strong> The "Check for updates" button now bypasses the browser's cached service worker file, so it correctly detects new versions on iOS home-screen installs and desktop Chrome — fixing a case where the button reported "you're on the latest" while a new version was actually live.</li>
+          <li><strong>Force refresh option</strong> on the Home screen footer — an escape hatch that resets the app files and reloads from the server. Your child's records (measurements, seizures, settings) are kept; only the app shell is reset.</li>
+          <li class="muted small">If you were already on an earlier 1.5 install and this version isn't picked up automatically, tapping <em>Check for updates</em> or <em>Force refresh</em> once will fix it. After that, future updates should arrive normally.</li>
+        </ul>
+
         <h4 class="whats-new-version">v1.5</h4>
         <ul>
           <li><strong>Monthly view, like a clinic spreadsheet.</strong> Trends and Patterns now show calendar months as columns (Apr, May, Jun…) for ranges longer than two months, and Mon–Sun weeks for ranges in between. Short ranges still show daily bars.</li>

@@ -1436,19 +1436,70 @@ function initExportScreen() {
   };
   const fromEl = document.getElementById('exportFrom');
   const toEl = document.getElementById('exportTo');
-  // v1.5 — default the From date to the KD start date if one is set, so the
-  // export covers the whole treatment period (matching what the dr looks at).
-  // Otherwise fall back to the last 30 days, as in v1.4.
-  if (!fromEl.value) {
-    const kdStart = getKdStartMs(state.settings);
-    if (kdStart != null) {
+  const kdChip = document.getElementById('exportKdChip');
+  const customChip = document.getElementById('exportCustomChip');
+  const rangeRow = document.getElementById('exportRangeRow');
+
+  const kdStart = getKdStartMs(state.settings);
+
+  // v1.5 — Two-chip range selector at the top of the Export screen:
+  //   Since KD started · Custom
+  // Default = "Since KD started" when a start date is set (the common case
+  // for clinic prep). Hides the chip row entirely if there's no KD start
+  // date — the page falls back to the v1.4 layout in that case.
+  if (kdStart != null) {
+    if (rangeRow) rangeRow.classList.remove('hidden');
+    if (kdChip) kdChip.classList.remove('hidden');
+    // Auto-fill the pickers from the KD start date → today every time the
+    // screen is opened, so an export taken next month covers up-to-date.
+    // Skip the auto-fill if Custom is currently selected (so the user's
+    // hand-picked dates aren't overwritten).
+    const customSelected = customChip && customChip.classList.contains('selected');
+    if (!customSelected) {
       fromEl.value = state.settings.kdStartDate;
-    } else {
+      toEl.value = fmt(today);
+      fromEl.disabled = true;
+      toEl.disabled = true;
+      if (kdChip) kdChip.classList.add('selected');
+      if (customChip) customChip.classList.remove('selected');
+    }
+  } else {
+    // No KD start date — fall back to v1.4 behaviour: hide chip row,
+    // default to last 30 days.
+    if (rangeRow) rangeRow.classList.add('hidden');
+    if (!fromEl.value) {
       const monthAgo = new Date(today.getTime() - 30*86400000);
       fromEl.value = fmt(monthAgo);
     }
+    if (!toEl.value) toEl.value = fmt(today);
+    fromEl.disabled = false;
+    toEl.disabled = false;
   }
-  if (!toEl.value)   toEl.value = fmt(today);
+}
+
+// v1.5 — Export-range chip click handler. Wired up at app init.
+function handleExportRangeChipClick(value) {
+  const fromEl = document.getElementById('exportFrom');
+  const toEl = document.getElementById('exportTo');
+  const today = new Date();
+  const fmt = (d) => {
+    const pad = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  };
+  if (value === 'kd') {
+    const kdStart = getKdStartMs(state.settings);
+    if (kdStart != null) {
+      fromEl.value = state.settings.kdStartDate;
+      toEl.value = fmt(today);
+    }
+    fromEl.disabled = true;
+    toEl.disabled = true;
+  } else {
+    // Custom — enable pickers. Don't reset values; the user can fine-tune
+    // whatever's currently shown.
+    fromEl.disabled = false;
+    toEl.disabled = false;
+  }
 }
 
 function getExportRange() {
@@ -1546,7 +1597,7 @@ async function handleSettingsSubmit(e) {
 // Single source of truth for the version label shown in-app. Keep in
 // sync with CACHE_NAME in sw.js. The "Check for updates" button compares
 // against this to decide what to tell the user.
-const APP_VERSION = 'v1.5';
+const APP_VERSION = 'v1.5.1';
 
 // Captured by registerServiceWorker() so the button has a reference.
 let _swRegistration = null;
@@ -1573,6 +1624,23 @@ async function handleCheckForUpdates() {
   const originalText = btn.textContent;
   btn.textContent = 'Checking…';
   try {
+    // v1.5.1 — Belt-and-braces: hard-fetch sw.js from network before asking
+    // the SW lifecycle to do its update check. This pushes the freshest bytes
+    // into the HTTP cache so the update() call below compares apples-to-apples.
+    // Some browsers (notably Safari/iOS) used to consult the HTTP cache when
+    // doing the SW update check even with updateViaCache: 'none', which led
+    // to the user being told "you're on the latest" while v1.5 sat at the
+    // server. The hard fetch fixes that.
+    //
+    // Cache-buster query string defeats any intermediate proxy cache too —
+    // GitHub Pages serves sw.js with max-age=600 by default.
+    const cacheBuster = '?v=' + Date.now();
+    try {
+      await fetch('sw.js' + cacheBuster, { cache: 'no-store' });
+    } catch (e) {
+      // If even the manual fetch fails, the device is probably offline.
+      // We still try reg.update() below — that has its own error path.
+    }
     await _swRegistration.update();
     // After update() resolves the SW may be installing in the background.
     // We give it a brief moment, then look at what's there.
@@ -1595,6 +1663,56 @@ async function handleCheckForUpdates() {
     btn.disabled = false;
     btn.textContent = originalText;
   }
+}
+
+/**
+ * v1.5.1 — Force refresh. The user's escape hatch when the normal update
+ * flow has failed — most commonly on iOS home-screen WebApps, where the
+ * service worker lifecycle is genuinely flaky.
+ *
+ * What it does:
+ *   1. Unregister the current service worker.
+ *   2. Delete every cache the SW has stored.
+ *   3. Hard-reload the page with a cache-buster query string so the very
+ *      next request bypasses any browser HTTP cache too.
+ *
+ * What it preserves:
+ *   - IndexedDB data (measurements, seizures, settings). The user's records
+ *     are NOT touched. Only the app shell is being reset.
+ *
+ * The confirmation dialog spells this out before any destruction happens.
+ */
+async function handleForceRefresh() {
+  const ok = confirm(
+    'This will reset the app files (the app shell) and reload from the server. ' +
+    'Your child\'s records — measurements, seizures, and settings — are NOT affected.\n\n' +
+    'Continue?'
+  );
+  if (!ok) return;
+  const btn = document.getElementById('forceRefreshBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Resetting…';
+  }
+  try {
+    // Step 1: unregister all SW registrations for this origin.
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister().catch(() => false)));
+    }
+    // Step 2: nuke caches.
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k).catch(() => false)));
+    }
+  } catch (e) {
+    console.warn('Force refresh cleanup error', e);
+  }
+  // Step 3: hard reload with a cache-buster. We use replace() rather than
+  // assign() so the user's history doesn't have the busted URL in it.
+  const url = new URL(window.location.href);
+  url.searchParams.set('_r', String(Date.now()));
+  window.location.replace(url.toString());
 }
 
 function toggleWhatsNewPanel() {
@@ -1759,6 +1877,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   wireCustomPicker('trend',    'trendCustomApply',    'trendCustomCancel');
   wireCustomPicker('patterns', 'patternsCustomApply', 'patternsCustomCancel');
 
+  // v1.5 — Export range chip group (Since KD started · Custom)
+  setupChipGroup('exportRange', false, handleExportRangeChipClick);
+
   // Settings
   setupChipGroup('settingVariant', false, (v) => {
     state.selectedSettingVariant = v;
@@ -1768,6 +1889,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // v1.4 — Updates block
   document.getElementById('checkForUpdatesBtn').addEventListener('click', handleCheckForUpdates);
+
+  // v1.5.1 — Force-refresh escape hatch (Home screen footer)
+  const forceBtn = document.getElementById('forceRefreshBtn');
+  if (forceBtn) forceBtn.addEventListener('click', handleForceRefresh);
 
   // v1.5 — Abbreviations expandable panel on About page
   const abbrevToggle = document.getElementById('abbrevToggle');
@@ -1857,7 +1982,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Register service worker for offline support + update detection
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').then((reg) => {
+    // v1.5.1 — updateViaCache: 'none' tells the browser NEVER to use the HTTP
+    // cache when fetching sw.js (or files in importScripts) for update checks.
+    // Without this, a freshly-deployed sw.js can sit "hidden" behind a stale
+    // HTTP cache entry for up to the Cache-Control max-age — which is why a
+    // parent on iOS or desktop Chrome could check for updates and be told
+    // "you're on the latest" while the server was actually serving v1.5.
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
       _swRegistration = reg;
       // Check for updates each time the app starts
       reg.update().catch(() => {});

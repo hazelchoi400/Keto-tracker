@@ -1421,6 +1421,45 @@ body::before {
   color: var(--ink);
 }
 
+/* v1.5.3 — The .abbrev-panel container is reused on the About page for
+   the "What could clear your data" panel, which has prose + bullet lists
+   rather than the abbreviations <dl>. These rules tighten paragraph and
+   list spacing inside the panel without affecting the abbreviations grid. */
+.abbrev-panel > p {
+  margin: 0 0 0.55rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.abbrev-panel > p:first-child {
+  margin-top: 0;
+}
+.abbrev-panel > p:last-child {
+  margin-bottom: 0;
+}
+.abbrev-panel > p strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+.abbrev-panel > ul {
+  margin: -0.2rem 0 0.7rem 1rem;
+  padding: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.abbrev-panel > ul li {
+  margin: 0 0 0.3rem;
+}
+.abbrev-panel > ul li:last-child {
+  margin-bottom: 0;
+}
+.abbrev-panel > p.muted.small {
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
 /* v1.5 — Hint line under a form field (e.g. KD start date) */
 .field-hint {
   margin: 0.25rem 0 0;

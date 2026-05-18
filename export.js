@@ -774,7 +774,7 @@ function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
     ['  Period          ' + fmtDateUK(fromMs) + ' to ' + fmtDateUK(toMs)],
     ['  Records         ' + nMeas + ' measurements, ' + nSeiz + ' seizures'],
     ['  Generated       ' + new Date().toLocaleString('en-GB')],
-    ['  App version     v1.5.2']
+    ['  App version     v1.5.3']
   ];
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = [{ wch: 78 }];

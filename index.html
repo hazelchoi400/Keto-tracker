@@ -748,6 +748,43 @@
       <p>If you delete this app, or clear your browser data, the entries are gone. Use the Backup option periodically if you want to be able to restore your records on a new device.</p>
 
       <div class="abbrev-block">
+        <button type="button" class="btn-link about-whatsnew-toggle" id="dataLossToggle" aria-expanded="false" aria-controls="dataLossPanel">What could clear your data</button>
+        <div class="abbrev-panel hidden" id="dataLossPanel" role="region" aria-label="Conditions that could clear your data">
+          <p>Because everything is stored locally on this device, these are the ways your records could go missing. Keeping a recent JSON backup protects against all of them.</p>
+
+          <p><strong>You clear it yourself, in the app</strong></p>
+          <ul>
+            <li>Tapping "Clear all data" in Settings.</li>
+            <li>Restoring a backup — this replaces all existing data with whatever's in the backup file.</li>
+          </ul>
+
+          <p><strong>You clear it without realising, outside the app</strong></p>
+          <ul>
+            <li>Uninstalling the app from your home screen.</li>
+            <li>Clearing browsing data or website data in your browser settings — even if the home-screen icon is still there, this wipes the underlying storage.</li>
+            <li>Opening the app in a different browser (Safari vs Chrome) — each browser has its own separate storage.</li>
+            <li>Using Private or Incognito mode — data only lasts until you close the tab.</li>
+            <li>Opening the app on a different device — no sync, the new device starts empty.</li>
+          </ul>
+
+          <p><strong>The browser or phone does it automatically</strong></p>
+          <ul>
+            <li><strong>iPhone / Safari 7-day rule:</strong> if you don't open the app for 7 days in a row, Safari may clear the data on its own. Holidays and busy weeks are the common cause.</li>
+            <li>The phone running out of storage — both iOS and Android can reclaim web-app storage to make room.</li>
+            <li>Major iPhone / Android system updates have sometimes wiped web-app data in the past.</li>
+          </ul>
+
+          <p><strong>Things that happen to the phone</strong></p>
+          <ul>
+            <li>Lost, stolen, water-damaged, or factory-reset phone.</li>
+            <li>"Set up new iPhone" type flows don't carry web-app data across.</li>
+          </ul>
+
+          <p class="muted small">Because of all this — but especially the 7-day inactivity rule on iPhone — it's worth saving a backup after every clinic visit, before any phone update, and before any planned period away from the app.</p>
+        </div>
+      </div>
+
+      <div class="abbrev-block">
         <button type="button" class="btn-link about-whatsnew-toggle" id="abbrevToggle" aria-expanded="false" aria-controls="abbrevPanel">Abbreviations</button>
         <div class="abbrev-panel hidden" id="abbrevPanel" role="region" aria-label="Abbreviations used in the app">
           <dl class="abbrev-list">
@@ -772,11 +809,16 @@
       <button type="button" class="btn-ghost" id="showWelcomeAgainBtn">Show welcome screen again</button>
 
       <div class="about-version-block">
-        <p class="about-version muted small">KetoCare · Version 1.5.2</p>
+        <p class="about-version muted small">KetoCare · Version 1.5.3</p>
         <button type="button" class="btn-link about-whatsnew-toggle" id="whatsNewToggle" aria-expanded="false" aria-controls="whatsNewPanel">What's new</button>
       </div>
 
       <div class="whats-new-panel hidden" id="whatsNewPanel" role="region" aria-label="Changelog">
+        <h4 class="whats-new-version">v1.5.3</h4>
+        <ul>
+          <li><strong>About page now explains what could clear your data.</strong> A new "What could clear your data" panel under the Your data section lists every condition — explicit clears, browser-level wipes, iPhone's 7-day inactivity rule, device events — so it's clear why keeping a recent backup matters.</li>
+        </ul>
+
         <h4 class="whats-new-version">v1.5.2</h4>
         <ul>
           <li><strong>Trends and Patterns default to "Since KD"</strong> as soon as you set a KD start date in Settings — no more landing on 1m or 1y by default when KD is set.</li>

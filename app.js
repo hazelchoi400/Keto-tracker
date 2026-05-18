@@ -1626,7 +1626,7 @@ async function handleSettingsSubmit(e) {
 // Single source of truth for the version label shown in-app. Keep in
 // sync with CACHE_NAME in sw.js. The "Check for updates" button compares
 // against this to decide what to tell the user.
-const APP_VERSION = 'v1.5.2';
+const APP_VERSION = 'v1.5.3';
 
 // Captured by registerServiceWorker() so the button has a reference.
 let _swRegistration = null;
@@ -1931,6 +1931,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     abbrevToggle.addEventListener('click', () => {
       const hidden = abbrevPanel.classList.toggle('hidden');
       abbrevToggle.setAttribute('aria-expanded', String(!hidden));
+    });
+  }
+
+  // v1.5.3 — Data-loss conditions expandable panel on About page.
+  // Same toggle pattern as abbreviations / what's-new.
+  const dataLossToggle = document.getElementById('dataLossToggle');
+  const dataLossPanel  = document.getElementById('dataLossPanel');
+  if (dataLossToggle && dataLossPanel) {
+    dataLossToggle.addEventListener('click', () => {
+      const hidden = dataLossPanel.classList.toggle('hidden');
+      dataLossToggle.setAttribute('aria-expanded', String(!hidden));
     });
   }
 

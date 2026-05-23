@@ -1263,15 +1263,26 @@ async function exportPDF(fromMs, toMs) {
  * `markers` = optional [{index, count}] for terracotta seizure-day dots along baseline.
  * Y-axis auto-fits both data and target band so values above the band stay visible.
  */
-// v1.5.4 — fill the off-screen canvas with the app's cream background before
-// Chart.js draws on it. We embed charts as JPEG to keep the PDF small
-// (roughly 5–10× smaller than PNG for Chart.js output), and JPEG has no
-// transparency — without this, the chart background would render black.
-function _fillCanvasCream(canvas) {
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#fffaf2';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-}
+// v1.5.4 — Fill chart background with the app's cream colour. We embed
+// charts as JPEG to keep the PDF small (roughly 5–10× smaller than PNG for
+// Chart.js output), and JPEG has no transparency — without a solid
+// background, the chart renders on black.
+//
+// A pre-fill of the canvas doesn't work: new Chart() clears the canvas
+// internally before each draw, wiping anything we painted beforehand.
+// Instead we register a Chart.js plugin that paints the cream fill on
+// every draw cycle, before the chart elements are drawn on top of it.
+const _CREAM_BG_PLUGIN = {
+  id: 'creamBackground',
+  beforeDraw(chart) {
+    const { ctx, width, height } = chart;
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.fillStyle = '#fffaf2';
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
+};
 
 async function renderOffscreenCombinedLineChartToPDF(doc, title, y, margin, pageW, series, color, targetBand, markers) {
   const imgW = pageW - margin * 2;
@@ -1294,7 +1305,6 @@ async function renderOffscreenCombinedLineChartToPDF(doc, title, y, margin, page
   canvas.style.width = '1200px';
   canvas.style.height = '480px';
   document.body.appendChild(canvas);
-  _fillCanvasCream(canvas);
 
   try {
     const datasets = [
@@ -1354,6 +1364,7 @@ async function renderOffscreenCombinedLineChartToPDF(doc, title, y, margin, page
     const yMax = KCCharts.suggestedYMax(series.data, targetBand);
 
     const chart = new Chart(canvas, {
+      plugins: [_CREAM_BG_PLUGIN],
       type: 'line',
       data: { labels: series.labels, datasets },
       options: {
@@ -1410,7 +1421,6 @@ async function renderOffscreenSplitLineChartToPDF(doc, title, y, margin, pageW, 
   canvas.style.width = '1200px';
   canvas.style.height = '520px';
   document.body.appendChild(canvas);
-  _fillCanvasCream(canvas);
 
   try {
     const datasets = [
@@ -1485,6 +1495,7 @@ async function renderOffscreenSplitLineChartToPDF(doc, title, y, margin, pageW, 
     const yMax = KCCharts.suggestedYMax(allVals, targetBand);
 
     const chart = new Chart(canvas, {
+      plugins: [_CREAM_BG_PLUGIN],
       type: 'line',
       data: { labels: series.labels, datasets },
       options: {
@@ -1983,10 +1994,10 @@ async function renderOffscreenHorizontalBarChartToPDF(doc, title, y, margin, pag
   canvas.style.width = '1200px';
   canvas.style.height = canvas.height + 'px';
   document.body.appendChild(canvas);
-  _fillCanvasCream(canvas);
 
   try {
     const chart = new Chart(canvas, {
+      plugins: [_CREAM_BG_PLUGIN],
       type: 'bar',
       data: {
         labels,
@@ -2058,10 +2069,10 @@ async function renderOffscreenBarChartToPDF(doc, title, y, margin, pageW, labels
   canvas.style.width = '1200px';
   canvas.style.height = '480px';
   document.body.appendChild(canvas);
-  _fillCanvasCream(canvas);
 
   try {
     const chart = new Chart(canvas, {
+      plugins: [_CREAM_BG_PLUGIN],
       type: 'bar',
       data: {
         labels,
@@ -2127,13 +2138,13 @@ async function renderOffscreenHourHistogramToPDF(doc, title, y, margin, pageW, d
   canvas.style.width = '1200px';
   canvas.style.height = '380px';
   document.body.appendChild(canvas);
-  _fillCanvasCream(canvas);
 
   try {
     const labels = data.map((_, h) => String(h));
     const majorTicks = new Set([0, 6, 12, 18]);
 
     const chart = new Chart(canvas, {
+      plugins: [_CREAM_BG_PLUGIN],
       type: 'bar',
       data: {
         labels,

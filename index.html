@@ -570,6 +570,11 @@
 
       <div class="export-range-row" id="exportRangeRow">
         <div class="export-kd-cell hidden" id="exportKdCell">
+          <!-- v1.5.4 — invisible label spacer so the chip sits level with the
+               date inputs (which have a visible "From" / "To" label above).
+               Mirroring the .field structure makes alignment automatic — no
+               line-height arithmetic needed. -->
+          <span class="export-kd-spacer" aria-hidden="true">&nbsp;</span>
           <button type="button" class="export-kd-btn" id="exportKdChip" title="Fill From with the KD start date and To with today">Since KD</button>
         </div>
         <div class="field">

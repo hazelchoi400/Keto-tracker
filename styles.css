@@ -558,12 +558,20 @@ body::before {
   text-overflow: ellipsis;
 }
 .export-kd-cell {
+  /* v1.5.4 — flex-column shape mirrors .field so the chip stacks under an
+     invisible label spacer at exactly the same height as the From/To
+     labels. The chip then lines up with the date inputs automatically,
+     regardless of label font metrics. */
   display: flex;
-  align-items: flex-end;
-  /* v1.5.4 — row is top-aligned so labels stay anchored when an input
-     wraps. To keep the chip level with the date inputs (not floating up
-     next to the labels), pad the cell down by the label height + gap. */
-  padding-top: calc(0.85rem * 1.2 + 0.45rem);
+  flex-direction: column;
+  gap: 0.45rem; /* match .field gap */
+}
+.export-kd-spacer {
+  /* Same font sizing as .field label so it reserves identical vertical
+     space, but invisible. visibility:hidden keeps the box, removes the ink. */
+  font-size: 0.85rem;
+  line-height: 1.2;
+  visibility: hidden;
 }
 .export-kd-cell.hidden { display: none; }
 

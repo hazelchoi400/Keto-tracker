@@ -93,7 +93,7 @@ async function exportXLSX(fromMs, toMs) {
   // is now folded into the Monthly tab as numbered chunks so a clinician
   // reads everything in one place rather than tab-hopping.
 
-  const filename = `ketocare_${(settings.childName || 'export').replace(/\s+/g,'_').toLowerCase()}_${fmtDateISO(fromMs)}_to_${fmtDateISO(toMs)}_full.xlsx`;
+  const filename = `ketolog_${(settings.childName || 'export').replace(/\s+/g,'_').toLowerCase()}_${fmtDateISO(fromMs)}_to_${fmtDateISO(toMs)}_full.xlsx`;
   XLSX.writeFile(wb, filename);
 }
 
@@ -133,7 +133,7 @@ function buildSummarySheet(settings, measurements, seizures, fromMs, toMs) {
   const totalDays = Math.max(1, Math.round((toMs - fromMs) / 86400000));
 
   const rows = [
-    ['KetoCare summary', ''],
+    ['KetoLog summary', ''],
     ['', ''],
     ['Child', settings.childName || '—'],
     ['Started ketogenic diet', settings.kdStartDate ? fmtDateUK(new Date(settings.kdStartDate + 'T00:00:00').getTime()) : '—'],
@@ -699,9 +699,9 @@ function buildSeizuresSheet(seizures, measurements, settings) {
  */
 function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
   const rows = [
-    ['KetoCare export — ReadMe'],
+    ['KetoLog export — ReadMe'],
     [''],
-    ['This spreadsheet was exported from KetoCare, a tracking tool used by'],
+    ['This spreadsheet was exported from KetoLog, a tracking tool used by'],
     ['parents of children on the ketogenic diet for epilepsy. It is a'],
     ['personal record-keeping tool, not a medical device.'],
     [''],
@@ -774,7 +774,7 @@ function buildReadMeSheet(settings, fromMs, toMs, nMeas, nSeiz) {
     ['  Period          ' + fmtDateUK(fromMs) + ' to ' + fmtDateUK(toMs)],
     ['  Records         ' + nMeas + ' measurements, ' + nSeiz + ' seizures'],
     ['  Generated       ' + new Date().toLocaleString('en-GB')],
-    ['  App version     v1.5.3']
+    ['  App version     v1.5.4']
   ];
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = [{ wch: 78 }];
@@ -950,7 +950,7 @@ function findNearestAfter(arr, ts, predicate) {
 async function exportJSON() {
   const data = await KCDB.exportAll();
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const filename = `ketocare_backup_${fmtDateISO(Date.now())}.json`;
+  const filename = `ketolog_backup_${fmtDateISO(Date.now())}.json`;
   downloadBlob(blob, filename);
 }
 
@@ -970,7 +970,7 @@ async function exportPDF(fromMs, toMs) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(20);
   doc.setTextColor(45, 42, 38);
-  doc.text('KetoCare Clinic Summary', MARGIN, y);
+  doc.text('KetoLog Clinic Summary', MARGIN, y);
   y += 8;
 
   doc.setFont('helvetica', 'normal');
@@ -1250,10 +1250,10 @@ async function exportPDF(fromMs, toMs) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(138, 130, 120);
-    doc.text(`KetoCare · page ${i} of ${pageCount}`, PAGE_W - MARGIN, 290, { align: 'right' });
+    doc.text(`KetoLog · page ${i} of ${pageCount}`, PAGE_W - MARGIN, 290, { align: 'right' });
   }
 
-  const filename = `ketocare_${(settings.childName || 'export').replace(/\s+/g,'_').toLowerCase()}_${fmtDateISO(fromMs)}_to_${fmtDateISO(toMs)}_summary.pdf`;
+  const filename = `ketolog_${(settings.childName || 'export').replace(/\s+/g,'_').toLowerCase()}_${fmtDateISO(fromMs)}_to_${fmtDateISO(toMs)}_summary.pdf`;
   doc.save(filename);
 }
 
@@ -1263,6 +1263,16 @@ async function exportPDF(fromMs, toMs) {
  * `markers` = optional [{index, count}] for terracotta seizure-day dots along baseline.
  * Y-axis auto-fits both data and target band so values above the band stay visible.
  */
+// v1.5.4 — fill the off-screen canvas with the app's cream background before
+// Chart.js draws on it. We embed charts as JPEG to keep the PDF small
+// (roughly 5–10× smaller than PNG for Chart.js output), and JPEG has no
+// transparency — without this, the chart background would render black.
+function _fillCanvasCream(canvas) {
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fffaf2';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
 async function renderOffscreenCombinedLineChartToPDF(doc, title, y, margin, pageW, series, color, targetBand, markers) {
   const imgW = pageW - margin * 2;
   const imgH = 60;
@@ -1284,6 +1294,7 @@ async function renderOffscreenCombinedLineChartToPDF(doc, title, y, margin, page
   canvas.style.width = '1200px';
   canvas.style.height = '480px';
   document.body.appendChild(canvas);
+  _fillCanvasCream(canvas);
 
   try {
     const datasets = [
@@ -1358,8 +1369,8 @@ async function renderOffscreenCombinedLineChartToPDF(doc, title, y, margin, page
     });
 
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const dataUrl = canvas.toDataURL('image/png', 1.0);
-    doc.addImage(dataUrl, 'PNG', margin, y, imgW, imgH);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    doc.addImage(dataUrl, 'JPEG', margin, y, imgW, imgH);
     chart.destroy();
   } catch (err) {
     console.warn('Chart render failed:', err);
@@ -1399,6 +1410,7 @@ async function renderOffscreenSplitLineChartToPDF(doc, title, y, margin, pageW, 
   canvas.style.width = '1200px';
   canvas.style.height = '520px';
   document.body.appendChild(canvas);
+  _fillCanvasCream(canvas);
 
   try {
     const datasets = [
@@ -1497,8 +1509,8 @@ async function renderOffscreenSplitLineChartToPDF(doc, title, y, margin, pageW, 
     });
 
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const dataUrl = canvas.toDataURL('image/png', 1.0);
-    doc.addImage(dataUrl, 'PNG', margin, y, imgW, imgH);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    doc.addImage(dataUrl, 'JPEG', margin, y, imgW, imgH);
     chart.destroy();
   } catch (err) {
     console.warn('Chart render failed:', err);
@@ -1971,6 +1983,7 @@ async function renderOffscreenHorizontalBarChartToPDF(doc, title, y, margin, pag
   canvas.style.width = '1200px';
   canvas.style.height = canvas.height + 'px';
   document.body.appendChild(canvas);
+  _fillCanvasCream(canvas);
 
   try {
     const chart = new Chart(canvas, {
@@ -1998,8 +2011,8 @@ async function renderOffscreenHorizontalBarChartToPDF(doc, title, y, margin, pag
     });
 
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const dataUrl = canvas.toDataURL('image/png', 1.0);
-    doc.addImage(dataUrl, 'PNG', margin, y, imgW, imgH);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    doc.addImage(dataUrl, 'JPEG', margin, y, imgW, imgH);
     chart.destroy();
   } catch (err) {
     console.warn('Chart render failed:', err);
@@ -2045,6 +2058,7 @@ async function renderOffscreenBarChartToPDF(doc, title, y, margin, pageW, labels
   canvas.style.width = '1200px';
   canvas.style.height = '480px';
   document.body.appendChild(canvas);
+  _fillCanvasCream(canvas);
 
   try {
     const chart = new Chart(canvas, {
@@ -2071,8 +2085,8 @@ async function renderOffscreenBarChartToPDF(doc, title, y, margin, pageW, labels
     });
 
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const dataUrl = canvas.toDataURL('image/png', 1.0);
-    doc.addImage(dataUrl, 'PNG', margin, y, imgW, imgH);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    doc.addImage(dataUrl, 'JPEG', margin, y, imgW, imgH);
     chart.destroy();
   } catch (err) {
     console.warn('Chart render failed:', err);
@@ -2113,6 +2127,7 @@ async function renderOffscreenHourHistogramToPDF(doc, title, y, margin, pageW, d
   canvas.style.width = '1200px';
   canvas.style.height = '380px';
   document.body.appendChild(canvas);
+  _fillCanvasCream(canvas);
 
   try {
     const labels = data.map((_, h) => String(h));
@@ -2152,8 +2167,8 @@ async function renderOffscreenHourHistogramToPDF(doc, title, y, margin, pageW, d
     });
 
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const dataUrl = canvas.toDataURL('image/png', 1.0);
-    doc.addImage(dataUrl, 'PNG', margin, y, imgW, imgH);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    doc.addImage(dataUrl, 'JPEG', margin, y, imgW, imgH);
     chart.destroy();
   } catch (err) {
     console.warn('Chart render failed:', err);

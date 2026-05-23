@@ -1,6 +1,6 @@
 {
-  "name": "KetoCare — Paediatric Ketogenic Diet Tracker",
-  "short_name": "KetoCare",
+  "name": "KetoLog — Paediatric Ketogenic Diet Tracker",
+  "short_name": "KetoLog",
   "id": "./?app=ketocare",
   "scope": "./",
   "description": "Track ketones, glucose, and seizures for children on the ketogenic diet.",

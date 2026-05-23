@@ -1,4 +1,4 @@
-# KetoCare
+# KetoLog
 
 A paediatric ketogenic diet tracker for parents of children with epilepsy. Logs ketones, glucose, GKI, and seizures with timing detail. Generates clinic-ready PDF summaries and an Excel workbook designed around the month-as-column view that clinicians already use.
 
@@ -15,7 +15,7 @@ That's it. No build step. No server.
 
 ## Add app icons (optional but recommended)
 
-The PWA manifest references `icon-192.png` and `icon-512.png` but they're not included. Without icons, the "Add to Home Screen" experience will use a generic placeholder. Make two square PNGs (192×192 and 512×512) with the KetoCare aesthetic — warm cream background, sage or terracotta mark — and drop them in the same folder.
+The PWA manifest references `icon-192.png` and `icon-512.png` but they're not included. Without icons, the "Add to Home Screen" experience will use a generic placeholder. Make two square PNGs (192×192 and 512×512) with the KetoLog aesthetic — warm cream background, sage or terracotta mark — and drop them in the same folder.
 
 ## Files
 

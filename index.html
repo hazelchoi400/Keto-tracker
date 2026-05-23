@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f4ede2" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <title>KetoCare — Paediatric Ketogenic Diet Tracker</title>
+  <title>KetoLog — Paediatric Ketogenic Diet Tracker</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="icon" type="image/png" href="icon-192.png" />
@@ -29,11 +29,11 @@
   <section class="screen welcome-screen" data-screen="welcome">
     <div class="welcome-content">
       <p class="welcome-eyebrow">Welcome to</p>
-      <h1 class="welcome-title">KetoCare</h1>
+      <h1 class="welcome-title">KetoLog</h1>
       <div class="welcome-mark"></div>
 
       <p class="welcome-lead">
-        KetoCare helps parents and carers keep track of their child's ketones, glucose, and seizures while on a ketogenic diet for epilepsy.
+        KetoLog helps parents and carers keep track of their child's ketones, glucose, and seizures while on a ketogenic diet for epilepsy.
       </p>
 
       <p class="welcome-body">
@@ -64,6 +64,36 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
     </header>
+
+    <!-- v1.5.4 — Install prompt banner. Hidden by default; shown by app.js only
+         when the app is running in a normal browser tab (not installed as a
+         PWA) AND the user hasn't dismissed it. Detection + show/hide logic
+         lives in renderHome(). -->
+    <div class="install-banner hidden" id="installBanner" role="region" aria-label="Install KetoLog">
+      <div class="install-banner-head">
+        <div class="install-banner-text">
+          <p class="install-banner-title">Add KetoLog to your home screen</p>
+          <p class="install-banner-sub">Opens like an app, works offline, and helps protect your data.</p>
+        </div>
+        <button type="button" class="install-banner-close" id="installBannerClose" aria-label="Dismiss for now">×</button>
+      </div>
+      <div class="install-banner-actions">
+        <button type="button" class="btn-link install-banner-toggle" id="installBannerToggleIos" aria-expanded="false" aria-controls="installBannerIosSteps">iPhone / iPad steps</button>
+        <button type="button" class="btn-link install-banner-toggle" id="installBannerToggleAndroid" aria-expanded="false" aria-controls="installBannerAndroidSteps">Android steps</button>
+      </div>
+      <ol class="install-banner-steps hidden" id="installBannerIosSteps">
+        <li>In Safari, tap the <strong>Share</strong> button (square with an up arrow) at the bottom of the screen.</li>
+        <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+        <li>Tap <strong>Add</strong> in the top right corner.</li>
+        <li>Open KetoLog from your home screen from now on — not from Safari.</li>
+      </ol>
+      <ol class="install-banner-steps hidden" id="installBannerAndroidSteps">
+        <li>In Chrome, tap the <strong>three-dot menu</strong> in the top right.</li>
+        <li>Tap <strong>Install app</strong> (or <strong>Add to Home screen</strong> on older versions).</li>
+        <li>Confirm by tapping <strong>Install</strong>.</li>
+        <li>Open KetoLog from your home screen from now on — not from the browser.</li>
+      </ol>
+    </div>
 
     <div class="today-card">
       <p class="today-label">Today's snapshot</p>
@@ -698,7 +728,7 @@
 
       <div class="divider"></div>
 
-      <button type="button" class="btn-link" data-go="about">About KetoCare</button>
+      <button type="button" class="btn-link" data-go="about">About KetoLog</button>
 
       <button type="button" class="btn-danger" id="clearDataBtn">Clear all data</button>
     </form>
@@ -721,7 +751,7 @@
       <p>A simple tool for parents and carers to record their child's ketones, glucose, and seizures during ketogenic diet therapy for epilepsy. It generates summaries that can be shared with your dietitian or neurologist at clinic appointments.</p>
 
       <h3 class="about-section-title">What it isn't</h3>
-      <p>KetoCare doesn't give medical advice. It doesn't tell you when to adjust your child's diet, when to give rescue medication, or when to seek urgent care. Those decisions belong with your child's clinical team and your written care plan.</p>
+      <p>KetoLog doesn't give medical advice. It doesn't tell you when to adjust your child's diet, when to give rescue medication, or when to seek urgent care. Those decisions belong with your child's clinical team and your written care plan.</p>
 
       <h3 class="about-section-title">How to use it</h3>
 
@@ -738,7 +768,7 @@
       <p><em>Export</em> lets you download a Summary report (PDF, good for clinic) or Detailed records (spreadsheet, good for closer review). You can email these or share them however you'd normally share documents.</p>
 
       <p class="about-subhead"><strong>Settings</strong></p>
-      <p>Set your child's name, target ranges, and alert thresholds in Settings. These are usually set by your ketogenic diet centre. KetoCare doesn't send reminder notifications — browsers can't reliably wake the app in the background, so most parents set a phone alarm for ketone checks.</p>
+      <p>Set your child's name, target ranges, and alert thresholds in Settings. These are usually set by your ketogenic diet centre. KetoLog doesn't send reminder notifications — browsers can't reliably wake the app in the background, so most parents set a phone alarm for ketone checks.</p>
 
       <h3 class="about-section-title">In an emergency</h3>
       <p>Follow your child's emergency care plan. If you don't have one, or you're unsure what to do, contact your local emergency services straight away.</p>
@@ -769,7 +799,7 @@
 
           <p><strong>The browser or phone does it automatically</strong></p>
           <ul>
-            <li><strong>iPhone / Safari 7-day rule:</strong> if you don't open the app for 7 days in a row, Safari may clear the data on its own. Holidays and busy weeks are the common cause.</li>
+            <li><strong>iPhone Safari 7-day rule:</strong> if you use KetoLog by opening it in Safari (not from a home-screen icon) and don't visit it for 7 days in a row, Safari may clear the data on its own. <strong>Adding the app to your home screen reduces this risk substantially</strong> — Apple gives home-screen web apps their own usage counter and doesn't intend to clear their data the same way. However, this is not a written guarantee from Apple, and parents have occasionally still reported losses after long gaps. A recent backup is the only complete protection.</li>
             <li>The phone running out of storage — both iOS and Android can reclaim web-app storage to make room.</li>
             <li>Major iPhone / Android system updates have sometimes wiped web-app data in the past.</li>
           </ul>
@@ -780,7 +810,7 @@
             <li>"Set up new iPhone" type flows don't carry web-app data across.</li>
           </ul>
 
-          <p class="muted small">Because of all this — but especially the 7-day inactivity rule on iPhone — it's worth saving a backup after every clinic visit, before any phone update, and before any planned period away from the app.</p>
+          <p class="muted small">Because of all this — but especially the 7-day inactivity rule on iPhone — it's worth adding KetoLog to your home screen <em>and</em> saving a backup after every clinic visit, before any phone update, and before any planned period away from the app.</p>
         </div>
       </div>
 
@@ -809,11 +839,20 @@
       <button type="button" class="btn-ghost" id="showWelcomeAgainBtn">Show welcome screen again</button>
 
       <div class="about-version-block">
-        <p class="about-version muted small">KetoCare · Version 1.5.3</p>
+        <p class="about-version muted small">KetoLog · Version 1.5.4</p>
         <button type="button" class="btn-link about-whatsnew-toggle" id="whatsNewToggle" aria-expanded="false" aria-controls="whatsNewPanel">What's new</button>
       </div>
 
       <div class="whats-new-panel hidden" id="whatsNewPanel" role="region" aria-label="Changelog">
+        <h4 class="whats-new-version">v1.5.4</h4>
+        <ul>
+          <li><strong>App renamed to KetoLog.</strong> Same app, new name. All your existing data is preserved — no action needed.</li>
+          <li><strong>Add to home screen prompt.</strong> A gentle nudge on the Home screen explains how to install KetoLog as a real app icon, with step-by-step instructions for iPhone and Android. Once you've installed it, the prompt disappears. Installing protects your data better and lets the app open like any other app.</li>
+          <li><strong>Smaller PDF summary reports.</strong> Charts inside the PDF are now compressed more efficiently, so the file is several times smaller than before — easier to send by email or message. The report looks the same.</li>
+          <li><strong>Export page date alignment fix.</strong> On some screens, longer "To" dates caused the field to wrap onto two lines and the label to drift out of alignment with "From". Both fields now stay neatly side by side.</li>
+          <li><strong>Clearer guidance on what could clear your data.</strong> The About page now explains how adding KetoLog to your home screen reduces (but doesn't fully remove) the risk of Safari's 7-day data clear.</li>
+        </ul>
+
         <h4 class="whats-new-version">v1.5.3</h4>
         <ul>
           <li><strong>About page now explains what could clear your data.</strong> A new "What could clear your data" panel under the Your data section lists every condition — explicit clears, browser-level wipes, iPhone's 7-day inactivity rule, device events — so it's clear why keeping a recent backup matters.</li>

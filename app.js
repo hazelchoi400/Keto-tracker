@@ -226,6 +226,8 @@ async function renderHome() {
 
   // v1.4 — keep the small "Running vX.X" footer in sync
   renderHomeVersionLabel();
+  // v1.5.4 — show/hide the "Add to home screen" banner based on install state
+  updateInstallBanner();
 }
 
 /* =====================================================
@@ -1626,7 +1628,7 @@ async function handleSettingsSubmit(e) {
 // Single source of truth for the version label shown in-app. Keep in
 // sync with CACHE_NAME in sw.js. The "Check for updates" button compares
 // against this to decide what to tell the user.
-const APP_VERSION = 'v1.5.3';
+const APP_VERSION = 'v1.5.4';
 
 // Captured by registerServiceWorker() so the button has a reference.
 let _swRegistration = null;
@@ -1640,6 +1642,87 @@ let _updateAvailable = false;
 function renderHomeVersionLabel() {
   const el = document.getElementById('homeVersionLabel');
   if (el) el.textContent = APP_VERSION;
+}
+
+/* =====================================================
+   v1.5.4 — Install-prompt banner on Home
+   Encourages "Add to Home Screen" because:
+     - PWAs added to the home screen survive longer than Safari tabs
+       (iOS Safari deletes script-writable storage after 7 days of
+       inactivity for plain tabs; home-screen web apps have their own
+       days-of-use counter and are not expected to be cleared the same way)
+     - The app feels like a real app to parents (no URL bar, full-screen)
+     - It always works offline once cached
+   We never trigger an install programmatically (iOS doesn't allow it; on
+   Android the beforeinstallprompt event is unreliable). We just show
+   instructions and trust the parent.
+   ===================================================== */
+
+const INSTALL_DISMISS_KEY = 'ketolog.installBannerDismissed';
+
+// True when the app is running as an installed PWA. Covers iOS Safari's
+// non-standard navigator.standalone, the standards-track display-mode
+// media query (used by Android Chrome + desktop installs), and the
+// document.referrer trick that some Android launchers leave behind.
+function isInstalledAsPWA() {
+  if (typeof window === 'undefined') return false;
+  if (window.navigator && window.navigator.standalone === true) return true;
+  try {
+    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
+    if (window.matchMedia && window.matchMedia('(display-mode: minimal-ui)').matches) return true;
+  } catch { /* old browsers */ }
+  if (document.referrer && document.referrer.startsWith('android-app://')) return true;
+  return false;
+}
+
+// True when the user is inside an in-app webview (Instagram, Facebook,
+// LinkedIn, TikTok, etc.) where "Add to Home Screen" is not available
+// and the only path is to open in the real browser first. We suppress
+// the banner there because the steps we'd show don't apply.
+function isInAppBrowser() {
+  const ua = (navigator.userAgent || '').toLowerCase();
+  return /(fban|fbav|instagram|line\/|twitter|linkedinapp|tiktok|wechat|micromessenger)/.test(ua);
+}
+
+function updateInstallBanner() {
+  const banner = document.getElementById('installBanner');
+  if (!banner) return;
+  const dismissed = (() => {
+    try { return localStorage.getItem(INSTALL_DISMISS_KEY) === '1'; }
+    catch { return false; }
+  })();
+  const show = !isInstalledAsPWA() && !isInAppBrowser() && !dismissed;
+  banner.classList.toggle('hidden', !show);
+}
+
+function wireInstallBannerHandlers() {
+  const closeBtn = document.getElementById('installBannerClose');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      try { localStorage.setItem(INSTALL_DISMISS_KEY, '1'); } catch {}
+      const banner = document.getElementById('installBanner');
+      if (banner) banner.classList.add('hidden');
+    });
+  }
+  const wireToggle = (btnId, panelId) => {
+    const btn = document.getElementById(btnId);
+    const panel = document.getElementById(panelId);
+    if (!btn || !panel) return;
+    btn.addEventListener('click', () => {
+      const willOpen = panel.classList.contains('hidden');
+      // Close the sibling panel so only one set of steps is open at a time
+      document.querySelectorAll('.install-banner-steps').forEach(p => {
+        if (p !== panel) p.classList.add('hidden');
+      });
+      document.querySelectorAll('.install-banner-toggle').forEach(b => {
+        if (b !== btn) b.setAttribute('aria-expanded', 'false');
+      });
+      panel.classList.toggle('hidden', !willOpen);
+      btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    });
+  };
+  wireToggle('installBannerToggleIos', 'installBannerIosSteps');
+  wireToggle('installBannerToggleAndroid', 'installBannerAndroidSteps');
 }
 
 async function handleCheckForUpdates() {
@@ -2020,6 +2103,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Initial render
   renderHome();
+  // v1.5.4 — wire install banner toggle + dismiss handlers (one-time)
+  wireInstallBannerHandlers();
 
   // Register service worker for offline support + update detection
   if ('serviceWorker' in navigator) {

@@ -1,12 +1,14 @@
 /* =====================================================
-   sw.js — KetoCare service worker
+   sw.js — KetoLog service worker
    Caches app shell + CDN scripts so the app works offline
    ===================================================== */
 
 // Bump this version string whenever you ship an update. The browser uses
 // it to detect new versions. The convention is to keep this in sync with
 // the "Version" label shown on the About page in index.html.
-const CACHE_NAME = 'ketocare-v1.5.3';
+// v1.5.4 — renamed from 'ketocare-*' to 'ketolog-*' alongside the visible
+// app rename. Old caches are cleared automatically by the activate handler.
+const CACHE_NAME = 'ketolog-v1.5.4';
 
 // Files to cache on install. Same-origin paths are relative; CDN URLs are absolute.
 const PRECACHE = [

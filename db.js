@@ -3,7 +3,11 @@
    Stores: settings, measurements, seizures
    ===================================================== */
 
-const DB_NAME = 'ketocare-db';
+const DB_NAME = 'ketocare-db'; // DO NOT RENAME — see note below
+// IndexedDB is keyed to this name. Renaming would orphan every existing user's
+// months of records (the data would still exist in 'ketocare-db' but be
+// unreachable from the new name). The app's visible name changed to "KetoLog"
+// in v1.5.4 but the internal database name is intentionally preserved.
 const DB_VERSION = 1;
 
 const STORE_SETTINGS     = 'settings';

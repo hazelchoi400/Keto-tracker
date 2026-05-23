@@ -544,7 +544,12 @@ body::before {
   display: grid;
   grid-template-columns: auto 1fr 1fr;
   gap: 0.4rem;
-  align-items: start;
+  /* v1.5.4 — `stretch` (not `end` or `start`) gives every cell in the row
+     the same height as the tallest, so the chip cell matches the From/To
+     .field height. Content inside each cell stays anchored by its own
+     flex layout, so this does NOT re-introduce the "To label drifts when
+     input wraps" bug that `end` caused. */
+  align-items: stretch;
 }
 .export-range-row > .field { min-width: 0; } /* let date inputs shrink */
 /* v1.5.4 — keep the date value on one line. Native <input type="date">
@@ -572,6 +577,14 @@ body::before {
   font-size: 0.85rem;
   line-height: 1.2;
   visibility: hidden;
+}
+/* Stretch the chip vertically to match the date-input height in the row.
+   Without this the chip is intrinsically a few px shorter (smaller font,
+   no native input chrome) and sits at the top of its cell, looking
+   misaligned next to the inputs. */
+.export-kd-cell .export-kd-btn {
+  flex: 1;
+  min-height: 0;
 }
 .export-kd-cell.hidden { display: none; }
 
